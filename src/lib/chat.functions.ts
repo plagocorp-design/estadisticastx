@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { casosDeArea, toCaso, type CasoRow } from "@/lib/casos";
+import { CASO_COLS } from "@/lib/casos.functions";
 import { esBandeja, manoDeRol, veElEquipo } from "@/lib/team.public";
 
 export type Mensaje = {
@@ -22,14 +24,20 @@ export type ChatResumen = {
 
 async function casoVisible(userId: string, role: string, casoId: number) {
   const sql = await getSql();
-  const mano = manoDeRol(role);
+  if (esBandeja(role)) {
+    const rows = await sql.query<CasoRow>(
+      `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id where c.id = $1`,
+      [casoId],
+    );
+    const caso = rows[0] ? toCaso(rows[0]) : null;
+    if (!caso || casosDeArea([caso], role).length === 0) return null;
+    return { id: caso.id, owner_id: caso.ownerId, placa: caso.placa };
+  }
   const rows = await sql.query<{ id: number; owner_id: string; placa: string }>(
     veElEquipo(role)
       ? `select id, owner_id, placa from casos where id = $1`
-      : esBandeja(role)
-        ? `select id, owner_id, placa from casos where id = $1 and mano = $2`
-        : `select id, owner_id, placa from casos where id = $1 and owner_id = $2`,
-    veElEquipo(role) ? [casoId] : [casoId, esBandeja(role) ? mano : userId],
+      : `select id, owner_id, placa from casos where id = $1 and owner_id = $2`,
+    veElEquipo(role) ? [casoId] : [casoId, userId],
   );
   return rows[0] ?? null;
 }

@@ -1,30 +1,55 @@
+import { huecosFirma } from "./contrato-pdf.server";
+
 const TOKEN = process.env.DOCUSEAL_API_TOKEN || "qbHb9RXS6g6ycpgtTgwxWLC4WDMrazyiqdC9g8PHJHy";
 
 type Firmante = { role: string; email: string; name: string };
 
-function zona(x: number, y: number, w: number, h: number, page: number) {
+function zona(x: number, y: number, w: number, h: number, page: number, alto = 1008) {
   return {
     x: Math.round((x / 612) * 1000) / 1000,
-    y: Math.round(((1008 - y - h) / 1008) * 1000) / 1000,
+    y: Math.round(((alto - y - h) / alto) * 1000) / 1000,
     w: Math.round((w / 612) * 1000) / 1000,
-    h: Math.round((h / 1008) * 1000) / 1000,
+    h: Math.round((h / alto) * 1000) / 1000,
     page,
   };
 }
 
-function camposDe(role: string, orden: number) {
-  const yFirma = 250 - orden * 62;
-  const yDatos = 340 - orden * 70;
+function camposDe(role: string, orden: number, total: number) {
+  const firma = huecosFirma(total, 300, 36)[orden] ?? { y: 250, h: 52 };
+  const datos = huecosFirma(total, 360, 48)[orden] ?? { y: 340, h: 52 };
   return {
-    name: "Firma",
+    name: orden === 0 ? "Firma" : `Firma ${orden + 1}`,
     type: "signature",
     role,
     required: true,
-    areas: [zona(330, yFirma, 170, 52, 2), zona(60, yDatos, 180, 52, 3)],
+    areas: [zona(330, firma.y, 170, firma.h, 2), zona(60, datos.y, 180, datos.h, 3)],
   };
 }
 
-export async function pedirFirmaDocuseal(pdf: string, placa: string, firmantes: Firmante[]) {
+export async function pedirFirmaDocuseal(pdf: string, placa: string, firmantes: Firmante[], carta = "") {
+  const documentos = [
+    {
+      name: `contrato-${placa}.pdf`,
+      file: pdf,
+      fields: firmantes.map((parte, orden) => camposDe(parte.role, orden, firmantes.length)),
+    },
+  ];
+  if (carta) {
+    documentos.push({
+      name: `carta-${placa}.pdf`,
+      file: carta,
+      fields: firmantes.map((parte, orden) => {
+        const sitio = huecosFirma(firmantes.length, 200, 80, 48)[orden] ?? { y: 150, h: 48 };
+        return {
+          name: orden === 0 ? "Firma carta" : `Firma carta ${orden + 1}`,
+          type: "signature",
+          role: parte.role,
+          required: true,
+          areas: [zona(56, sitio.y, 200, sitio.h, 1, 792)],
+        };
+      }),
+    });
+  }
   const response = await fetch("https://api.docuseal.com/submissions/pdf", {
     method: "POST",
     headers: {
@@ -35,13 +60,7 @@ export async function pedirFirmaDocuseal(pdf: string, placa: string, firmantes: 
       name: `Contrato ${placa}`,
       send_email: true,
       order: "random",
-      documents: [
-        {
-          name: `contrato-${placa}.pdf`,
-          file: pdf,
-          fields: firmantes.map((parte, orden) => camposDe(parte.role, orden)),
-        },
-      ],
+      documents: documentos,
       submitters: firmantes,
       message: {
         subject: `Contrato para firmar · ${placa}`,
@@ -118,14 +137,17 @@ export async function leerDocuseal(envioId: string) {
     })
     .join(". ");
   const listo = json.status === "completed";
-  const firmadoUrl = json.documents?.find((doc) => doc.url)?.url || json.combined_document_url || "";
-  const [contrato, auditoria] = listo
-    ? await Promise.all([bajar(firmadoUrl), bajar(json.audit_log_url || "")])
-    : ["", ""];
+  const porNombre = (pista: string) => json.documents?.find((doc) => (doc.name || "").toLowerCase().includes(pista))?.url || "";
+  const contratoUrl = porNombre("contrato") || json.documents?.find((doc) => doc.url)?.url || json.combined_document_url || "";
+  const cartaUrl = porNombre("carta");
+  const [contrato, carta, auditoria] = listo
+    ? await Promise.all([bajar(contratoUrl), bajar(cartaUrl), bajar(json.audit_log_url || "")])
+    : ["", "", ""];
   return {
     listo,
     estado: listo ? "completed" : partes.some((parte) => parte.opened_at) ? "abierto" : "pendiente",
     contrato,
+    carta,
     auditoria,
     resumen,
   };

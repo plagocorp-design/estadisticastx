@@ -23,7 +23,10 @@ export function EnviarFirma({
   marca,
   linea,
   modelo,
+  empresa,
+  copropietarios = "",
   onEnviado,
+  onOtros,
 }: {
   casoId: number;
   correo: string;
@@ -35,7 +38,10 @@ export function EnviarFirma({
   marca: string;
   linea: string;
   modelo: string;
+  empresa: string;
+  copropietarios?: string;
   onEnviado?: (id: string) => void;
+  onOtros?: (valor: string) => void;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [para, setPara] = useState(correo);
@@ -49,10 +55,18 @@ export function EnviarFirma({
   const [serie, setSerie] = useState("");
   const [cilindraje, setCilindraje] = useState("");
   const [servicio, setServicio] = useState("PÚBLICO");
-  const [otro, setOtro] = useState(false);
-  const [segundoNombre, setSegundoNombre] = useState("");
-  const [segundoCc, setSegundoCc] = useState("");
-  const [segundoCorreo, setSegundoCorreo] = useState("");
+  const [nitAnterior, setNitAnterior] = useState("");
+  const [otros, setOtros] = useState<{ nombre: string; cc: string; correo: string }[]>(() => {
+    try {
+      const data = JSON.parse(copropietarios) as { nombre?: string; cc?: string; correo?: string }[];
+      if (!Array.isArray(data)) return [];
+      return data
+        .filter((parte) => parte && typeof parte.nombre === "string" && parte.nombre.trim())
+        .map((parte) => ({ nombre: parte.nombre ?? "", cc: parte.cc ?? "", correo: parte.correo ?? "" }));
+    } catch {
+      return [];
+    }
+  });
   const [error, setError] = useState("");
   const [enviados, setEnviados] = useState<{ correo: string; enlace: string; ok: boolean; error: string }[]>([]);
   const [guardando, setGuardando] = useState(false);
@@ -80,17 +94,22 @@ export function EnviarFirma({
           serie,
           cilindraje,
           servicio,
-          segundoNombre: otro ? segundoNombre : "",
-          segundoCc: otro ? segundoCc : "",
-          segundoCorreo: otro ? segundoCorreo : "",
+          nitAnterior,
+          otros,
           soloAbrir,
         },
       });
       if (soloAbrir && result.enviados[0]) {
-        const sigue = result.enviados[1]?.enlace.split("/").pop();
-        window.location.assign(result.enviados[0].enlace + (sigue ? `?sigue=${sigue}` : ""));
+        onOtros?.(JSON.stringify(otros));
+        const resto = result.enviados
+          .slice(1)
+          .map((item) => item.enlace.split("/").pop() ?? "")
+          .filter(Boolean)
+          .join(",");
+        window.location.assign(result.enviados[0].enlace + (resto ? `?sigue=${encodeURIComponent(resto)}` : ""));
         return;
       }
+      onOtros?.(JSON.stringify(otros));
       setEnviados(result.enviados);
       if (result.docusealId) onEnviado?.(result.docusealId);
       const pendiente = result.enviados.find((item) => !item.ok && item.correo.includes("@"));
@@ -120,7 +139,7 @@ export function EnviarFirma({
   return (
     <form onSubmit={(e) => void enviar(e)} className="grid gap-2 rounded-card border border-line bg-paper p-3">
       <p className="text-sm font-semibold">Portal de firma · {placa}</p>
-      <p className="text-xs text-ink-soft">Estos datos quedan escritos en el contrato. El correo lo manda DocuSeal. Si no sale, copia el enlace o ábrelo en tu correo.</p>
+      <p className="text-xs text-ink-soft">El contrato y la carta de desvinculación salen con estos datos. La carta no usa datos de otro cliente. El correo lo manda DocuSeal. Si no sale, copia el enlace.</p>
       <input value={para} onChange={(e) => setPara(e.target.value)} placeholder="Correo del propietario" className="h-11 rounded-2xl border border-line px-3" />
       <input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="Dirección" className="h-11 rounded-2xl border border-line px-3" />
       <div className="grid gap-2 sm:grid-cols-3">
@@ -136,17 +155,52 @@ export function EnviarFirma({
         <input value={cilindraje} onChange={(e) => setCilindraje(e.target.value)} placeholder="Cilindraje" className="h-11 rounded-2xl border border-line px-3" />
         <input value={servicio} onChange={(e) => setServicio(e.target.value)} placeholder="Servicio" className="h-11 rounded-2xl border border-line px-3" />
       </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={otro} onChange={(e) => setOtro(e.target.checked)} />
-        Hay otro propietario
-      </label>
-      {otro ? (
-        <div className="grid gap-2">
-          <input value={segundoNombre} onChange={(e) => setSegundoNombre(e.target.value)} placeholder="Nombre del otro propietario" className="h-11 rounded-2xl border border-line px-3" />
-          <input value={segundoCc} onChange={(e) => setSegundoCc(e.target.value)} placeholder="Cédula" className="h-11 rounded-2xl border border-line px-3" />
-          <input value={segundoCorreo} onChange={(e) => setSegundoCorreo(e.target.value)} placeholder="Correo del otro propietario" className="h-11 rounded-2xl border border-line px-3" />
-        </div>
+      {empresa && !/ninguna/i.test(empresa) ? (
+        <input value={nitAnterior} onChange={(e) => setNitAnterior(e.target.value)} placeholder={`NIT de ${empresa}, si lo tienes`} className="h-11 rounded-2xl border border-line px-3" />
       ) : null}
+      <div className="grid gap-2">
+        <p className="text-sm font-semibold">Propietarios</p>
+        <p className="text-xs text-ink-soft">El primero es {nombre || "el de la ficha"}. Agrega los demás si el vehículo tiene más dueños. Cada uno firma.</p>
+        {otros.map((parte, indice) => (
+          <div key={indice} className="grid gap-2 rounded-2xl border border-line p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold">Propietario {indice + 2}</p>
+              <button
+                type="button"
+                className="text-sm font-semibold text-danger"
+                onClick={() => setOtros(otros.filter((_, i) => i !== indice))}
+              >
+                Quitar
+              </button>
+            </div>
+            <input
+              value={parte.nombre}
+              onChange={(e) => setOtros(otros.map((item, i) => (i === indice ? { ...item, nombre: e.target.value } : item)))}
+              placeholder="Nombre"
+              className="h-11 rounded-2xl border border-line px-3"
+            />
+            <input
+              value={parte.cc}
+              onChange={(e) => setOtros(otros.map((item, i) => (i === indice ? { ...item, cc: e.target.value } : item)))}
+              placeholder="Cédula"
+              className="h-11 rounded-2xl border border-line px-3"
+            />
+            <input
+              value={parte.correo}
+              onChange={(e) => setOtros(otros.map((item, i) => (i === indice ? { ...item, correo: e.target.value } : item)))}
+              placeholder="Correo"
+              className="h-11 rounded-2xl border border-line px-3"
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => setOtros([...otros, { nombre: "", cc: "", correo: "" }])}
+          className="h-11 rounded-2xl border border-line text-sm font-semibold"
+        >
+          Agregar propietario
+        </button>
+      </div>
       {error ? <p className="text-sm text-danger">{error}</p> : null}
       {enviados.map((item) => (
         <div key={item.enlace} className="grid gap-2 rounded-2xl border border-line p-3 text-sm">

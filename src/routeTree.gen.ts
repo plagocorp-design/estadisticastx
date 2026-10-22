@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as PilotoRouteImport } from './routes/piloto'
 import { Route as ApiDocusealRouteImport } from './routes/api/docuseal'
 import { Route as ApiSheetsRouteImport } from './routes/api/sheets'
 import { Route as FirmarTokenRouteImport } from './routes/firmar.$token'
@@ -24,6 +25,11 @@ const IndexRoute = IndexRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PilotoRoute = PilotoRouteImport.update({
+  id: '/piloto',
+  path: '/piloto',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDocusealRoute = ApiDocusealRouteImport.update({
@@ -50,6 +56,7 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/piloto': typeof PilotoRoute
   '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/firmar/$token': typeof FirmarTokenRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/piloto': typeof PilotoRoute
   '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/firmar/$token': typeof FirmarTokenRoute
@@ -67,6 +75,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/piloto': typeof PilotoRoute
   '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/firmar/$token': typeof FirmarTokenRoute
@@ -77,6 +86,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/piloto'
     | '/api/docuseal'
     | '/api/sheets'
     | '/firmar/$token'
@@ -85,6 +95,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/piloto'
     | '/api/docuseal'
     | '/api/sheets'
     | '/firmar/$token'
@@ -93,6 +104,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/login'
+    | '/piloto'
     | '/api/docuseal'
     | '/api/sheets'
     | '/firmar/$token'
@@ -102,6 +114,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  PilotoRoute: typeof PilotoRoute
   ApiDocusealRoute: typeof ApiDocusealRoute
   ApiSheetsRoute: typeof ApiSheetsRoute
   FirmarTokenRoute: typeof FirmarTokenRoute
@@ -122,6 +135,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/piloto': {
+      id: '/piloto'
+      path: '/piloto'
+      fullPath: '/piloto'
+      preLoaderRoute: typeof PilotoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/docuseal': {
@@ -158,6 +178,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  PilotoRoute: PilotoRoute,
   ApiDocusealRoute: ApiDocusealRoute,
   ApiSheetsRoute: ApiSheetsRoute,
   FirmarTokenRoute: FirmarTokenRoute,

@@ -101,10 +101,10 @@ export function SheetsPanel({ onClose }: { onClose: () => void }) {
           <ol className="list-decimal space-y-2 pl-5 text-ink-soft">
             <li>Abre el documento Vincula Libre (ya está en tu Drive; el link queda abajo).</li>
             <li>Extensiones → Apps Script. Borra lo que haya, pega el script del recuadro y guarda.</li>
-            <li>Arriba, donde dice la función, elige autorizar y pulsa Ejecutar. Acepta los permisos. Eso también borra una clave vieja si Conectar dice que no coincide.</li>
-            <li>Implementar → Nueva implementación. Si no ves Aplicación web, pulsa el engranaje y márcala.</li>
-            <li>Ejecutar como: Yo. Quién tiene acceso: Cualquier persona. Copia esa URL. Si lo dejas en Solo yo, aquí sale tiempo agotado y el documento queda vacío.</li>
-            <li>Pégala abajo, con el link del documento, y dale a Conectar.</li>
+            <li>Arriba, donde dice la función, elige autorizar y pulsa Ejecutar. Acepta Sheets y también Drive.</li>
+            <li>Si ya estaba conectado, no hagas otra URL. Implementar → Administrar implementaciones → el lápiz → Versión: Nueva versión → Implementar. La URL sigue igual.</li>
+            <li>Si es la primera vez: Implementar → Nueva implementación. Ejecutar como: Yo. Quién tiene acceso: Cualquier persona. Copia la URL que termina en /exec.</li>
+            <li>Pégala abajo, con el link del documento, y dale a Conectar. Los documentos quedan en Drive, carpeta Vincula Libre, una carpeta por placa.</li>
           </ol>
           <p className="text-ink-soft">
             Para mover un proceso puedes cambiar la columna Estado (Dijo sí, En firma, Póliza lista…) o marcar Sí / No.

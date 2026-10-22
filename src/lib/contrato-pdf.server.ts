@@ -4,6 +4,23 @@ import type { DatosFirma } from "./firma.functions";
 
 const tinta = rgb(0.07, 0.13, 0.22);
 
+export function huecosFirma(cantidad: number, techo: number, piso: number, altoBase = 52) {
+  const n = Math.max(cantidad, 1);
+  const alto = n <= 2 ? altoBase : n <= 4 ? Math.min(40, altoBase) : n <= 6 ? 30 : 22;
+  const paso = alto + 10;
+  const inicio = Math.min(techo, piso + (n - 1) * paso);
+  return Array.from({ length: n }, (_, i) => ({ y: Math.round(inicio - i * paso), h: alto }));
+}
+
+function duenosDe(datos: DatosFirma) {
+  const extras = datos.propietarios?.length
+    ? datos.propietarios
+    : datos.copropietario
+      ? [{ nombre: datos.copropietario, cc: datos.cc2 ?? "" }]
+      : [];
+  return [{ nombre: datos.nombre, cc: datos.cc }, ...extras.filter((p) => p.nombre)];
+}
+
 function seguro(value: string) {
   return String(value ?? "")
     .normalize("NFC")
@@ -39,10 +56,11 @@ export async function montarContrato(
     page.drawText(limpio, { x, y, size, font, color: tinta });
   }
 
-  const nombres = [datos.nombre, datos.copropietario].filter(Boolean).join("  /  ");
-  const cedulas = [datos.cc, datos.cc2].filter(Boolean).join("  /  ");
-  texto(pagina, nombres, 60, 852, 10);
-  texto(pagina, cedulas, 350, 852, 10);
+  const duenos = duenosDe(datos);
+  const nombres = duenos.map((p) => p.nombre).filter(Boolean).join("  /  ");
+  const cedulas = duenos.map((p) => p.cc).filter(Boolean).join("  /  ");
+  texto(pagina, nombres, 60, 852, nombres.length > 42 ? 8 : 10);
+  texto(pagina, cedulas, 350, 852, cedulas.length > 24 ? 8 : 10);
   texto(pagina, datos.direccion, 112, 799, 8);
   texto(pagina, datos.telefono, 398, 799, 8);
   texto(pagina, datos.marca, 92, 733, 8);
@@ -67,15 +85,18 @@ export async function montarContrato(
   texto(datosPersonales, datos.telefono, 102, 471, 10);
   texto(datosPersonales, datos.direccion, 108, 446, 9);
 
+  const huecos = huecosFirma(Math.max(firmas.length, 1), 300, 36);
+  const huecosDatos = huecosFirma(Math.max(firmas.length, 1), 360, 48);
   for (const [indice, firmaHecha] of firmas.entries()) {
     const base = firmaHecha.png.replace(/^data:image\/png;base64,/, "");
     if (base.length < 40) continue;
     const imagen = await doc.embedPng(Buffer.from(base, "base64"));
-    const y = 250 - indice * 62;
-    firma.drawImage(imagen, { x: 330, y, width: 170, height: 52 });
-    texto(firma, firmaHecha.nombre, 330, y - 10, 7);
-    datosPersonales.drawImage(imagen, { x: 60, y: 340 - indice * 70, width: 180, height: 52 });
-    texto(datosPersonales, firmaHecha.nombre, 60, 328 - indice * 70, 8);
+    const sitio = huecos[indice] ?? huecos[huecos.length - 1];
+    const sitioDatos = huecosDatos[indice] ?? huecosDatos[huecosDatos.length - 1];
+    firma.drawImage(imagen, { x: 330, y: sitio.y, width: 170, height: sitio.h });
+    texto(firma, firmaHecha.nombre, 330, sitio.y - 10, 7);
+    datosPersonales.drawImage(imagen, { x: 60, y: sitioDatos.y, width: 180, height: sitioDatos.h });
+    texto(datosPersonales, firmaHecha.nombre, 60, sitioDatos.y - 10, 8);
   }
 
   return Buffer.from(await doc.save()).toString("base64");

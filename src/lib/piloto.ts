@@ -1,5 +1,5 @@
 export const DOCS_PILOTO = [
-  { id: "unificado", label: "PDF con todo" },
+  { id: "unificado", label: "Paquete completo" },
   { id: "cedula", label: "Cédula" },
   { id: "tarjeta_propiedad", label: "Tarjeta de propiedad" },
   { id: "tarjeta_operacion", label: "Tarjeta de operación" },
@@ -21,6 +21,41 @@ export const BENEFICIOS = [
   { id: "tarjeta", label: "Tarjeta de operación" },
   { id: "distintivos", label: "Distintivos" },
 ] as const;
+
+export const MARCAS_OP = [
+  { id: "docs_bus", label: "Documentos pasados a bus" },
+  { id: "docs_movilidad", label: "Documentos pasados a movilidad" },
+  { id: "pago_tarjeta", label: "Pago de la tarjeta de operación hecho" },
+  { id: "tarjeta_proceso", label: "Tarjeta de operación en proceso" },
+  { id: "tarjeta_recibida", label: "Tarjeta de operación recibida" },
+] as const;
+
+export const MARCAS_VIA = [
+  { id: "carta_radicada", label: "Carta radicada" },
+  { id: "link_expedido", label: "Link de pago expedido" },
+  { id: "pago_recibido", label: "Pago recibido" },
+  { id: "carta_firmada", label: "Carta firmada" },
+  { id: "carta_devolucion", label: "Carta de devolución de días de póliza no usados" },
+  { id: "recaudos", label: "Recaudos" },
+  { id: "polizas_impresas", label: "Pólizas impresas, listas para recoger" },
+  { id: "polizas_a_david", label: "Pólizas entregadas a David" },
+] as const;
+
+export const MARCAS_SERVICIO = [{ id: "atendido", label: "Atendido en servicio al cliente" }] as const;
+
+const MARCA_IDS = new Set<string>([...MARCAS_OP, ...MARCAS_VIA, ...MARCAS_SERVICIO].map((m) => m.id));
+
+export function marcasDe(value: unknown) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => MARCA_IDS.has(item));
+}
+
+export function etiquetaMarca(id: string, atencion = "") {
+  if (id === "pago_recibido" && atencion === "presencial") return "Pago recibido en cajas";
+  return [...MARCAS_OP, ...MARCAS_VIA, ...MARCAS_SERVICIO].find((m) => m.id === id)?.label ?? id;
+}
 
 export const TARJETAS_OP = [
   { id: "pagada", label: "Pagada" },

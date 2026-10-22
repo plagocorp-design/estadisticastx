@@ -117,10 +117,10 @@ export function PortalFirma({ token }: { token: string }) {
   return (
     <main className="mx-auto min-h-screen max-w-2xl px-4 py-8">
       <p className="text-sm font-semibold text-navy">Radio Taxi Aeropuerto · Vincula Libre</p>
-      <h1 className="mt-1 text-2xl font-semibold">Contrato de vinculación</h1>
+      <h1 className="mt-1 text-2xl font-semibold">Contrato y carta</h1>
       <p className="mt-2 text-sm text-ink-soft">
-        {nombre}, este es el contrato de Radio Taxi. Léelo y firma abajo. La firma queda en el mismo PDF.
-        {otro ? ` El otro propietario ${otro}.` : ""}
+        {nombre}, primero va el contrato y después la carta de desvinculación de la póliza anterior. Léelos y firma abajo. La misma firma queda en los dos.
+        {otro ? ` ${otro}.` : ""}
       </p>
       {pdf ? (
         <iframe title="Contrato de vinculación" src={`data:application/pdf;base64,${pdf}`} className="mt-4 h-[70vh] w-full rounded-card border border-line bg-white" />
@@ -128,11 +128,17 @@ export function PortalFirma({ token }: { token: string }) {
       {ya ? (
         <div className="mt-6 grid gap-3">
           <p className="rounded-card border border-line bg-card p-4 font-semibold text-navy">{listo || "Este enlace ya está firmado."}</p>
-          {sigue && /^[A-Za-z0-9_-]{20,80}$/.test(sigue) ? (
-            <a href={`/firmar/${sigue}`} className="grid h-12 place-items-center rounded-2xl bg-navy text-sm font-semibold text-paper">
-              Ahora firma el otro propietario
-            </a>
-          ) : null}
+          {(() => {
+            const cola = sigue.split(",").map((item) => decodeURIComponent(item).trim()).filter((item) => /^[A-Za-z0-9_-]{20,80}$/.test(item));
+            const siguiente = cola[0];
+            const resto = cola.slice(1).join(",");
+            if (!siguiente) return null;
+            return (
+              <a href={`/firmar/${siguiente}${resto ? `?sigue=${encodeURIComponent(resto)}` : ""}`} className="grid h-12 place-items-center rounded-2xl bg-navy text-sm font-semibold text-paper">
+                Ahora firma el siguiente propietario
+              </a>
+            );
+          })()}
         </div>
       ) : (
         <div className="mt-6">
@@ -147,7 +153,7 @@ export function PortalFirma({ token }: { token: string }) {
             onClick={() => void firmar()}
             className="mt-3 h-12 w-full rounded-2xl bg-navy text-sm font-semibold text-paper disabled:opacity-60"
           >
-            {guardando ? "Guardando…" : "Firmar contrato"}
+            {guardando ? "Guardando…" : "Firmar contrato y carta"}
           </button>
         </div>
       )}

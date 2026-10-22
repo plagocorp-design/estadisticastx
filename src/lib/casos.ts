@@ -46,6 +46,7 @@ export type Caso = {
   mano: Mano;
   viaEstado: ViaEstado;
   viaEnlace: string;
+  viaAtencion: "" | "presencial" | "virtual";
   viaNota: string;
   viaPideCarta: boolean;
   viaPideContrato: boolean;
@@ -57,8 +58,10 @@ export type Caso = {
   servicioNota: string;
   bonos: string;
   beneficios: string;
+  areaMarcas: string;
   manoAsignado: string;
   devolucion: string;
+  copropietarios: string;
   contratoNombre: string;
   docusealId: string;
   docusealEstado: string;
@@ -172,6 +175,7 @@ export function toCaso(row: CasoRow): Caso {
     mano: manoDe(row.mano),
     viaEstado: viaEstadoDe(row.via_estado),
     viaEnlace: String(row.via_enlace ?? ""),
+    viaAtencion: row.via_atencion === "presencial" || row.via_atencion === "virtual" ? row.via_atencion : "",
     viaNota: String(row.via_nota ?? ""),
     viaPideCarta: Boolean(row.via_pide_carta),
     viaPideContrato: Boolean(row.via_pide_contrato),
@@ -183,8 +187,10 @@ export function toCaso(row: CasoRow): Caso {
     servicioNota: String(row.servicio_nota ?? ""),
     bonos: String(row.bonos ?? ""),
     beneficios: String(row.beneficios ?? ""),
+    areaMarcas: String(row.area_marcas ?? ""),
     manoAsignado: String(row.mano_asignado ?? ""),
     devolucion: String(row.devolucion ?? ""),
+    copropietarios: String(row.copropietarios ?? ""),
     contratoNombre: row.contrato_nombre ?? "",
     docusealId: String(row.docuseal_id ?? ""),
     docusealEstado: String(row.docuseal_estado ?? ""),
@@ -258,6 +264,19 @@ export function hoyBogota() {
 export const POLIZA_ESTADOS = ["En Vía Seguros", "Póliza lista", "Pólizas con David", "Por aceptar", "Pólizas entregadas"] as const;
 
 export const OPERATIVA_ESTADOS = ["En operativa", "Tarjeta radicada", "Tarjeta expedida", "Entregada"] as const;
+
+export function casosDeArea(rows: Caso[], role: string) {
+  if (role === "via_seguros") {
+    return rows.filter((c) => c.mano === "via");
+  }
+  if (role === "operativa") {
+    return rows.filter((c) => c.mano === "operativa" || (!c.completado && (OPERATIVA_ESTADOS as readonly string[]).includes(c.estado)));
+  }
+  if (role === "servicio") {
+    return rows.filter((c) => c.mano === "servicio" || c.completado);
+  }
+  return rows;
+}
 
 export function tableroDe(rows: Caso[]) {
   return {

@@ -57,7 +57,46 @@ function doPost(e) {
     }
     return json({ ok: true });
   }
+  if (body.accion === 'archivo') {
+    var nombre = String(body.nombre || 'archivo').replace(/[\\\\/]/g, '-').slice(0, 180);
+    var placa = String(body.placa || 'SIN-PLACA').replace(/[^A-Za-z0-9]/g, '').slice(0, 10) || 'SIN-PLACA';
+    var bytes = Utilities.base64Decode(String(body.archivo || ''));
+    var folder = carpetaDePlaca(placa);
+    var file = folder.createFile(Utilities.newBlob(bytes, body.mime || 'application/octet-stream', nombre));
+    return json({ ok: true, id: file.getId(), url: file.getUrl() });
+  }
+  if (body.accion === 'bajar') {
+    var guardado = DriveApp.getFileById(String(body.id || ''));
+    return json({
+      ok: true,
+      nombre: guardado.getName(),
+      archivo: Utilities.base64Encode(guardado.getBlob().getBytes())
+    });
+  }
+  if (body.accion === 'borrar') {
+    DriveApp.getFileById(String(body.id || '')).setTrashed(true);
+    return json({ ok: true });
+  }
   return json({ ok: false, error: 'accion' });
+}
+
+function carpetaVincula() {
+  var p = props();
+  var id = p.getProperty('carpeta');
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (err) {}
+  }
+  var halladas = DriveApp.getFoldersByName('Vincula Libre');
+  var folder = halladas.hasNext() ? halladas.next() : DriveApp.createFolder('Vincula Libre');
+  p.setProperty('carpeta', folder.getId());
+  return folder;
+}
+
+function carpetaDePlaca(placa) {
+  var raiz = carpetaVincula();
+  var halladas = raiz.getFoldersByName(placa);
+  if (halladas.hasNext()) return halladas.next();
+  return raiz.createFolder(placa);
 }
 
 function escribirHoja(nombre, filas) {

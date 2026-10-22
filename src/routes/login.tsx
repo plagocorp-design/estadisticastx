@@ -38,7 +38,8 @@ function Login() {
       }
       const token = (result.data as { token?: string }).token;
       if (token) sessionStorage.setItem("grok-auth.bearer-token", token);
-      await navigate({ to: "/" });
+      const next = new URLSearchParams(window.location.search).get("next");
+      await navigate({ to: next === "/piloto" ? "/piloto" : "/" });
     } catch {
       setError("No pude entrar. Revisa usuario y clave.");
       setBusy(false);
@@ -49,7 +50,7 @@ function Login() {
     <main className="grid min-h-screen lg:grid-cols-2">
       <section className="hidden flex-col justify-between bg-navy px-10 py-12 text-paper lg:flex">
         <div className="flex items-center gap-3">
-          <img src="/taxis-libres.png" alt="Taxis Libres" className="h-12 w-auto rounded-md bg-black" />
+          <img src="/taxis-libres-blanco.png" alt="Taxis Libres" className="h-12 w-auto" />
         </div>
         <div>
           <p className="text-sm font-medium text-lime">Seguimiento de afiliaciones</p>
@@ -70,7 +71,7 @@ function Login() {
       <section className="flex items-center justify-center px-5 py-10">
         <form onSubmit={submit} className="rise w-full max-w-md">
           <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <img src="/taxis-libres.png" alt="Taxis Libres" className="h-10 w-auto rounded-md bg-black lg:hidden" />
+            <img src="/taxis-libres.png" alt="Taxis Libres" className="h-10 w-auto lg:hidden" />
           </div>
           <h2 className="text-2xl font-semibold">Entra</h2>
           <p className="mt-1 text-sm text-ink-soft">Escribe tu usuario y tu clave. Ya no hay que escoger el nombre.</p>
