@@ -105,7 +105,7 @@ export function ChatCaso({
     <section className="rounded-card border border-line bg-paper p-3">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="text-sm font-semibold">Chat del proceso</h3>
-        <p className="text-xs text-ink-soft">Solo el asesor y coordinación</p>
+        <p className="text-xs text-ink-soft">Asesor, coordinación y el área que tenga el proceso</p>
       </div>
       <p className="mt-1 text-sm text-ink-soft">
         {puedePreguntar

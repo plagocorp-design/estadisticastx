@@ -49,8 +49,7 @@ function Login() {
     <main className="grid min-h-screen lg:grid-cols-2">
       <section className="hidden flex-col justify-between bg-navy px-10 py-12 text-paper lg:flex">
         <div className="flex items-center gap-3">
-          <Mark />
-          <p className="text-lg font-semibold tracking-tight">Vincula Libre</p>
+          <img src="/taxis-libres.png" alt="Taxis Libres" className="h-12 w-auto rounded-md bg-black" />
         </div>
         <div>
           <p className="text-sm font-medium text-lime">Seguimiento de afiliaciones</p>
@@ -63,6 +62,7 @@ function Login() {
             <li>3. Firma de carta y contrato</li>
             <li>4. Póliza en Vía Seguros</li>
             <li>5. Operativa, tarjeta y entrega</li>
+            <li>6. Servicio al cliente: bonos y beneficios</li>
           </ol>
         </div>
         <p className="text-xs text-paper/60">Radio Taxi Aeropuerto · Taxis Libres</p>
@@ -70,8 +70,7 @@ function Login() {
       <section className="flex items-center justify-center px-5 py-10">
         <form onSubmit={submit} className="rise w-full max-w-md">
           <div className="mb-6 flex items-center gap-3 lg:hidden">
-            <Mark />
-            <p className="text-lg font-semibold">Vincula Libre</p>
+            <img src="/taxis-libres.png" alt="Taxis Libres" className="h-10 w-auto rounded-md bg-black lg:hidden" />
           </div>
           <h2 className="text-2xl font-semibold">Entra</h2>
           <p className="mt-1 text-sm text-ink-soft">Escribe tu usuario y tu clave. Ya no hay que escoger el nombre.</p>
@@ -112,11 +111,5 @@ function Login() {
         </form>
       </section>
     </main>
-  );
-}
-
-function Mark() {
-  return (
-    <span className="grid h-10 w-10 place-items-center rounded-xl bg-lime text-lg font-bold text-navy">T</span>
   );
 }

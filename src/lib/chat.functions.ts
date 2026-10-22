@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { veElEquipo } from "@/lib/team.public";
+import { esBandeja, manoDeRol, veElEquipo } from "@/lib/team.public";
 
 export type Mensaje = {
   id: number;
@@ -22,11 +22,14 @@ export type ChatResumen = {
 
 async function casoVisible(userId: string, role: string, casoId: number) {
   const sql = await getSql();
+  const mano = manoDeRol(role);
   const rows = await sql.query<{ id: number; owner_id: string; placa: string }>(
     veElEquipo(role)
       ? `select id, owner_id, placa from casos where id = $1`
-      : `select id, owner_id, placa from casos where id = $1 and owner_id = $2`,
-    veElEquipo(role) ? [casoId] : [casoId, userId],
+      : esBandeja(role)
+        ? `select id, owner_id, placa from casos where id = $1 and mano = $2`
+        : `select id, owner_id, placa from casos where id = $1 and owner_id = $2`,
+    veElEquipo(role) ? [casoId] : [casoId, esBandeja(role) ? mano : userId],
   );
   return rows[0] ?? null;
 }
@@ -39,6 +42,7 @@ export const resumenChat = createServerFn({ method: "GET" })
     if (!profile) return [];
     const sql = await getSql();
     const equipo = veElEquipo(profile.role);
+    const mano = manoDeRol(profile.role);
     const ultimos = await sql.query<{
       caso_id: number;
       body: string;
@@ -51,9 +55,9 @@ export const resumenChat = createServerFn({ method: "GET" })
        from mensajes m
        join casos c on c.id = m.caso_id
        join profiles p on p.user_id = m.author_id
-       where ($1::boolean or c.owner_id = $2)
+       where ($1::boolean or ($3 <> '' and c.mano = $3) or ($3 = '' and c.owner_id = $2))
        order by m.caso_id, m.created_at desc, m.id desc`,
-      [equipo, context.userId],
+      [equipo, context.userId, mano],
     );
     const noLeidos = await sql.query<{ caso_id: number; sin_leer: number }>(
       `select m.caso_id, count(*)::int as sin_leer
@@ -62,9 +66,9 @@ export const resumenChat = createServerFn({ method: "GET" })
        left join chat_visto v on v.caso_id = m.caso_id and v.user_id = $2
        where m.author_id <> $2
          and m.created_at > coalesce(v.visto_at, '1970-01-01'::timestamptz)
-         and ($1::boolean or c.owner_id = $2)
+         and ($1::boolean or ($3 <> '' and c.mano = $3) or ($3 = '' and c.owner_id = $2))
        group by m.caso_id`,
-      [equipo, context.userId],
+      [equipo, context.userId, mano],
     );
     const porCaso = new Map(noLeidos.map((row) => [Number(row.caso_id), Number(row.sin_leer)]));
     return ultimos.map((row) => ({
@@ -159,14 +163,15 @@ export const marcarChatsLeidos = createServerFn({ method: "POST" })
     const profile = await profileFor(context.userId);
     if (!profile) throw new Error("No encontré tu usuario");
     const sql = await getSql();
+    const mano = manoDeRol(profile.role);
     await sql.query(
       `insert into chat_visto (caso_id, user_id, visto_at)
        select distinct m.caso_id, $2, now()
        from mensajes m
        join casos c on c.id = m.caso_id
-       where ($1::boolean or c.owner_id = $2)
+       where ($1::boolean or ($3 <> '' and c.mano = $3) or ($3 = '' and c.owner_id = $2))
        on conflict (caso_id, user_id) do update set visto_at = now()`,
-      [veElEquipo(profile.role), context.userId],
+      [veElEquipo(profile.role), context.userId, mano],
     );
     return { ok: true };
   });
