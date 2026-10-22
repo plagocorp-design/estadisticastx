@@ -1,4 +1,4 @@
-export type Role = "asesor" | "lider" | "coordinadora";
+export type Role = "asesor" | "lider" | "coordinadora" | "via_seguros" | "operativa" | "servicio";
 
 export const TEAM_PUBLIC: { slug: string; name: string; email: string; role: Role }[] = [
   { slug: "david", name: "David Jaimes", email: "david@vinculalibre.app", role: "lider" },
@@ -28,7 +28,21 @@ export function llevaProcesos(role: string | null | undefined) {
 export function etiquetaRol(role: string | null | undefined) {
   if (role === "lider") return "Asesor líder";
   if (role === "coordinadora") return "Coordinación";
+  if (role === "via_seguros") return "Vía Seguros";
+  if (role === "operativa") return "Operativa";
+  if (role === "servicio") return "Servicio al cliente";
   return "Asesor";
+}
+
+export function esBandeja(role: string | null | undefined) {
+  return role === "via_seguros" || role === "operativa" || role === "servicio";
+}
+
+export function manoDeRol(role: string | null | undefined) {
+  if (role === "via_seguros") return "via";
+  if (role === "operativa") return "operativa";
+  if (role === "servicio") return "servicio";
+  return "";
 }
 
 export function nombreLista(person: { name: string; role: string }) {
