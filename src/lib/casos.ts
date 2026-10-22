@@ -57,6 +57,8 @@ export type Caso = {
   servicioNota: string;
   bonos: string;
   beneficios: string;
+  manoAsignado: string;
+  devolucion: string;
   contratoNombre: string;
   docusealId: string;
   docusealEstado: string;
@@ -181,6 +183,8 @@ export function toCaso(row: CasoRow): Caso {
     servicioNota: String(row.servicio_nota ?? ""),
     bonos: String(row.bonos ?? ""),
     beneficios: String(row.beneficios ?? ""),
+    manoAsignado: String(row.mano_asignado ?? ""),
+    devolucion: String(row.devolucion ?? ""),
     contratoNombre: row.contrato_nombre ?? "",
     docusealId: String(row.docuseal_id ?? ""),
     docusealEstado: String(row.docuseal_estado ?? ""),
