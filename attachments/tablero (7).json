@@ -1,0 +1,1116 @@
+{
+  "version": 1,
+  "boards": [
+    {
+      "id": "b-vincula",
+      "name": "Vinculación",
+      "nodes": [
+        {
+          "id": "n-mv191sn5-3",
+          "title": "Contacto con el propietario",
+          "kind": "paso",
+          "step": 1,
+          "x": 570.8921888413088,
+          "y": 20.472802778696487,
+          "notes": "Ya sea mediante calle o call center\nAquí se contempla  los siguientes puntos del como se continua ",
+          "items": [
+            {
+              "id": "i-mv19puhq-2",
+              "text": "Responsables: asesores de vinculación",
+              "done": false
+            },
+            {
+              "id": "i-mv1cpu2k-4",
+              "text": "Responsabilidades:  Asesorar y convencer de hacer posible el traslado del vehículo",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv192uo1-5",
+          "title": "Convecimiento",
+          "kind": "paso",
+          "step": 2,
+          "x": 570.9203645793465,
+          "y": 337.23934924463896,
+          "notes": "Una vez el asesor logre realizar el convencimiento dándole a conocer todos los beneficios y requisitos, se daría inicio al proceso de vinculación  ",
+          "items": [
+            {
+              "id": "i-mv1d9f1t-h",
+              "text": "Responsables: asesores de vinculación",
+              "done": false
+            },
+            {
+              "id": "i-mv1d9irq-i",
+              "text": "Responsabilidades:  Dar a conocer todo que tenemos a beneficio de los propietarios y conductores",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv1cvrjx-5",
+          "title": "Consulta del perfil  en la nueva plataforma del formulario",
+          "kind": "paso",
+          "step": 3,
+          "x": 572.0769315603852,
+          "y": 663.7469857494104,
+          "notes": "Aquí se realiza lo que es la consulta por la placa del vehículo",
+          "items": [
+            {
+              "id": "i-mv1eeunh-2o",
+              "text": "Responsables: Asesores de vinculacion",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv1d0xcz-7",
+          "title": "Consulta exitosa",
+          "kind": "paso",
+          "step": 4,
+          "x": 179.149133700018,
+          "y": 931.244704919628,
+          "notes": "Si el resultado de la consulta es positivo  podemos continuar con lo siguiente",
+          "items": [
+            {
+              "id": "i-mv1d4ohb-b",
+              "text": "La validación de los datos de las personas que salen asociados a ese vehiculos",
+              "done": false
+            },
+            {
+              "id": "i-mv1d50cg-c",
+              "text": "La validacion de los datos del vehiculo",
+              "done": false
+            }
+          ],
+          "align": "center"
+        },
+        {
+          "id": "n-mv1d1438-8",
+          "title": "Consulta no exitosa",
+          "kind": "paso",
+          "step": 5,
+          "x": 904.1249241207993,
+          "y": 927.0977236055821,
+          "notes": "Llegado el caso en la consulta del sistema salen datos no existentes de deben solicitar el registro ",
+          "items": []
+        },
+        {
+          "id": "n-mv1eid0t-2r",
+          "title": "La firma del contrato",
+          "kind": "decision",
+          "step": 6,
+          "x": 213.6744052322504,
+          "y": 1725.7552033376207,
+          "notes": "El propietario o los propietarios deben  acceder mediante los medios de envió (whatsapp) para la firma del contrato",
+          "items": [],
+          "bubble": "soft",
+          "w": 292.67235153192854,
+          "h": 146
+        },
+        {
+          "id": "n-mv1epie3-2u",
+          "title": "Registro  de vehículo nuevo",
+          "kind": "paso",
+          "step": 7,
+          "x": 901.2330014111144,
+          "y": 1126.0729962786313,
+          "notes": "Nos comunicamos con el área de Online donde nos ayudaran con el registro. donde debemos dar los siguientes datos del propietario o de los propietarios",
+          "items": [
+            {
+              "id": "i-mv1gt0z7-2y",
+              "text": "Dirección de domicilio y número de teléfono celular.",
+              "done": false
+            },
+            {
+              "id": "i-mv1gthxw-30",
+              "text": " Dirección del propietario y número de celular. ",
+              "done": false
+            },
+            {
+              "id": "i-mv1gti7o-31",
+              "text": "Correo Gmail. ",
+              "done": false
+            },
+            {
+              "id": "i-mv1gtie6-32",
+              "text": " Tu cédula por ambos lados. ",
+              "done": false
+            },
+            {
+              "id": "i-mv1h9ghn-36",
+              "text": "Foto de tu tarjetón completo",
+              "done": false
+            },
+            {
+              "id": "i-mv1h9guo-37",
+              "text": "Tu licencia de conduccion por ambos lados",
+              "done": false
+            },
+            {
+              "id": "i-mv1h9haf-38",
+              "text": "Tarjeta de operacion del taxi de que manejas",
+              "done": false
+            },
+            {
+              "id": "i-mv1h9hgx-39",
+              "text": "SOAT",
+              "done": false
+            },
+            {
+              "id": "i-mv1h9jdq-3a",
+              "text": "Tarjeta de propiedad del taxi que maneja",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv1hmg8y-3d",
+          "title": "Volver a consultar una vez nos confirmen el registro",
+          "kind": "paso",
+          "step": 8,
+          "x": 385.01393037603304,
+          "y": 1234.3915620077767,
+          "notes": "Si el resultado de la consulta es positivo  podemos continuar con lo siguiente",
+          "items": [
+            {
+              "id": "i-mv1hmg8y-3e",
+              "text": "La validación de los datos de las personas que salen asociados a ese vehiculos",
+              "done": false
+            },
+            {
+              "id": "i-mv1hmg8y-3f",
+              "text": "La validacion de los datos del vehiculo",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv1i4avn-3l",
+          "title": "Pasamos el proceso en el sistema a Via Seguros",
+          "kind": "paso",
+          "step": 10,
+          "x": 156.97524036599293,
+          "y": 2285.6495652047693,
+          "notes": "Donde lo que se busca es que se puedan realizar 2 cosas principales",
+          "items": [
+            {
+              "id": "i-mv67fumm-3",
+              "text": "Radicación de la carta de desvinculación llegado el caso se encuentren vigentes",
+              "done": false
+            },
+            {
+              "id": "i-mv67j6rf-6",
+              "text": "Solicitud de reintegro de los dias no utilizados de la póliza anterior si aplica",
+              "done": false
+            },
+            {
+              "id": "i-mv67ksb3-7",
+              "text": "Compra de las nuevas polizas",
+              "done": false,
+              "items": [
+                {
+                  "id": "i-mv67xs3i-n",
+                  "text": "La compra ya se podra realizar por via virtual (No \"Mi perfil taxis libres\" porque aún no tendran acceso)",
+                  "done": false
+                }
+              ]
+            }
+          ],
+          "w": 408.57142857142856,
+          "h": 290
+        },
+        {
+          "id": "n-mv2m68hq-1",
+          "title": "El sistema",
+          "kind": "documento",
+          "step": 1,
+          "x": -317.4480088799907,
+          "y": 860.0724622937878,
+          "notes": "En el sistema debe estar conectado con  SAO y Con Odoo (CRM) \n\nFuncionaria de la siguiente manera: ",
+          "items": [
+            {
+              "id": "i-mv2m9e5j-2",
+              "text": "Debe ser lo mas simplificado posible donde solo por la consulta de placa se arrastre los datos desde SAO ",
+              "done": false
+            },
+            {
+              "id": "i-mv2mffxv-4",
+              "text": "Debe permitir la corrección de esos datos arrastrados  ",
+              "done": false
+            },
+            {
+              "id": "i-mv2mi5zg-7",
+              "text": "Debe permitir trasladas el estado del proceso entre las diferentes partes  las cuales son:",
+              "done": false,
+              "items": [
+                {
+                  "id": "i-mv2t899i-2k",
+                  "text": "Asesor",
+                  "done": false
+                },
+                {
+                  "id": "i-mv2t8sc1-2l",
+                  "text": "Vía seguros",
+                  "done": false
+                },
+                {
+                  "id": "i-mv2t9gsy-2m",
+                  "text": "Operativa",
+                  "done": false
+                },
+                {
+                  "id": "i-mv2t9rbs-2n",
+                  "text": "Servicio al cliente",
+                  "done": false
+                }
+              ]
+            },
+            {
+              "id": "i-mv67g94h-4",
+              "text": "Debe permitir firmar las cartas de desvinculacion de la empresa donde el propietario tenga sus polizas vigentes y la solicitud de reintegro de los dias no ejecutados de esa polizas",
+              "done": false
+            }
+          ],
+          "w": 363.5686041306747,
+          "h": 364.77196231410915
+        },
+        {
+          "id": "n-mv67t7xy-b",
+          "title": "Subida de documentacion",
+          "kind": "paso",
+          "step": 11,
+          "x": 150.21697278253328,
+          "y": 1930.197060180218,
+          "notes": "Esta es toda la documentación requerida",
+          "items": [
+            {
+              "id": "i-mv67t7xy-c",
+              "text": "Dirección de domicilio y número de teléfono celular.",
+              "done": false
+            },
+            {
+              "id": "i-mv67t7xy-d",
+              "text": " Dirección del propietario y número de celular. ",
+              "done": false
+            },
+            {
+              "id": "i-mv67t7xy-e",
+              "text": "Correo Gmail. ",
+              "done": false
+            },
+            {
+              "id": "i-mv67t7xy-f",
+              "text": "Cédula por ambos lados. ",
+              "done": false
+            },
+            {
+              "id": "i-mv67t7xy-g",
+              "text": "Tarjetón completo (Cupo)",
+              "done": false
+            },
+            {
+              "id": "i-mv67t7xy-i",
+              "text": "Tarjeta de operación del taxi",
+              "done": false
+            },
+            {
+              "id": "i-mv67t7xy-j",
+              "text": "SOAT",
+              "done": false
+            },
+            {
+              "id": "i-mv67t7xy-k",
+              "text": "Tarjeta de propiedad",
+              "done": false
+            }
+          ],
+          "w": 418.4797718328676,
+          "h": 297.5689787849245
+        },
+        {
+          "id": "n-mv680ik5-o",
+          "title": "Pasamos el proceso en el sistema a Operativa",
+          "kind": "paso",
+          "step": 12,
+          "x": 156.10559659952872,
+          "y": 2659.5336968909446,
+          "notes": "Donde aquí se tendrá la responsabilidad de la radicación de la tarjeta de operación que no tendra costo",
+          "items": [
+            {
+              "id": "i-mv682n0d-q",
+              "text": "Aqui se debe tener el apoyo del equipo de cajas para que expiden los vouchers con valor a 0$ para poder tener un recibo y poder realizar la radicacion y que realmente salga sin costo asi como el equipo comercial cumpla",
+              "done": false
+            }
+          ],
+          "w": 408.13522612206395,
+          "h": 296.8129610878079
+        },
+        {
+          "id": "n-mv68822q-3k",
+          "step": 14,
+          "title": "Pasamos el proceso en el sistema a SAC",
+          "kind": "paso",
+          "x": 153.35319829833696,
+          "y": 3010.2978933252816,
+          "notes": "Cierre con el afiliado: Aquí es donde le daremos la bienvenida a los propietarios con sus vehículos y dando por concluido el último proceso que es la entrega de la tarjeta de operación con los siguientes beneficios",
+          "items": [
+            {
+              "id": "i-mv68822q-3l",
+              "text": "Distintivos (bono)",
+              "done": false
+            },
+            {
+              "id": "i-mv68822q-3m",
+              "text": "Certificado",
+              "done": false
+            },
+            {
+              "id": "i-mv68822q-3n",
+              "text": "Meses de rodamiento",
+              "done": false
+            },
+            {
+              "id": "i-mv68822q-3o",
+              "text": "Rodamiento",
+              "done": false
+            },
+            {
+              "id": "i-mv68822q-3p",
+              "text": "Beneficios",
+              "done": false
+            },
+            {
+              "id": "i-mv68822q-3q",
+              "text": "Asesor personal",
+              "done": false
+            }
+          ],
+          "w": 409.89023739940876,
+          "h": 314
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-mv19odbh-1",
+          "from": "n-mv191sn5-3",
+          "to": "n-mv192uo1-5",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv1cwmb3-6",
+          "from": "n-mv192uo1-5",
+          "to": "n-mv1cvrjx-5",
+          "label": "Si ",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv1d1di5-9",
+          "from": "n-mv1cvrjx-5",
+          "to": "n-mv1d0xcz-7",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv1d1f0l-a",
+          "from": "n-mv1cvrjx-5",
+          "to": "n-mv1d1438-8",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv1eifnu-2s",
+          "from": "n-mv1d0xcz-7",
+          "to": "n-mv1eid0t-2r",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv1erysk-2v",
+          "from": "n-mv1d1438-8",
+          "to": "n-mv1epie3-2u",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv1hmukl-3i",
+          "from": "n-mv1epie3-2u",
+          "to": "n-mv1hmg8y-3d",
+          "label": "Confirmacion del registro",
+          "fromSide": "left",
+          "toSide": "right",
+          "marks": [
+            {
+              "id": "m-mv5btli8-1",
+              "text": "Confirmacion del registro",
+              "shape": "text",
+              "color": "lime",
+              "size": "lg"
+            }
+          ]
+        },
+        {
+          "id": "e-mv1hn7aa-3j",
+          "from": "n-mv1hmg8y-3d",
+          "to": "n-mv1eid0t-2r",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv2mgysl-5",
+          "from": "n-mv1cvrjx-5",
+          "to": "n-mv2m68hq-1",
+          "label": "",
+          "fromSide": "left",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv2mh8y6-6",
+          "from": "n-mv2m68hq-1",
+          "to": "n-mv1d0xcz-7",
+          "label": "",
+          "fromSide": "right",
+          "toSide": "left"
+        },
+        {
+          "id": "e-mv67imrb-5",
+          "from": "n-mv1i4avn-3l",
+          "to": "n-mv2m68hq-1",
+          "label": "",
+          "fromSide": "left",
+          "toSide": "bottom"
+        },
+        {
+          "id": "e-mv67unag-l",
+          "from": "n-mv1eid0t-2r",
+          "to": "n-mv67t7xy-b",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv67upel-m",
+          "from": "n-mv67t7xy-b",
+          "to": "n-mv1i4avn-3l",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv681b7t-p",
+          "from": "n-mv1i4avn-3l",
+          "to": "n-mv680ik5-o",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        },
+        {
+          "id": "e-mv68a2ma-3r",
+          "from": "n-mv680ik5-o",
+          "to": "n-mv68822q-3k",
+          "label": "",
+          "fromSide": "bottom",
+          "toSide": "top"
+        }
+      ]
+    },
+    {
+      "id": "b-mv2t5tu3-1",
+      "name": "Mapa nuevo",
+      "nodes": [],
+      "edges": []
+    },
+    {
+      "id": "b-mv687rzt-1l",
+      "name": "Vinculación",
+      "nodes": [
+        {
+          "id": "n-mv687rzt-12",
+          "step": 1,
+          "title": "Canales de llegada",
+          "kind": "paso",
+          "x": 32,
+          "y": 36,
+          "notes": "De dónde entra el afiliado. En el vidrio cada canal está aparte porque el trámite no arranca igual.",
+          "items": [
+            {
+              "id": "i-mv687rzt-1m",
+              "text": "Call",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1n",
+              "text": "Calle",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1o",
+              "text": "SUC (propietarios)",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1p",
+              "text": "Avales",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1q",
+              "text": "Calle (programación)",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1r",
+              "text": "Otras empresas",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1s",
+              "text": "Tramitadores",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-13",
+          "step": 2,
+          "title": "Formulario",
+          "kind": "paso",
+          "x": 32,
+          "y": 420,
+          "notes": "La placa abre dos caminos: datos del vehículo y datos de la persona. De aquí se baja al registro y al contrato.",
+          "items": [
+            {
+              "id": "i-mv687rzt-1t",
+              "text": "Placa",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1u",
+              "text": "Datos del vehículo",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1v",
+              "text": "Datos personales",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-14",
+          "step": 3,
+          "title": "Registro de propietarios",
+          "kind": "paso",
+          "x": 32,
+          "y": 700,
+          "notes": "Cruzar con el registro de propietarios antes de armar el contrato.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-15",
+          "step": 4,
+          "title": "Datos del propietario",
+          "kind": "persona",
+          "x": 400,
+          "y": 36,
+          "notes": "Pedir todo el contacto y la foto de la cédula. La certificación bancaria y los seguros vigentes van con este bloque.",
+          "items": [
+            {
+              "id": "i-mv687rzt-1w",
+              "text": "Nombre completo",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1x",
+              "text": "Cédula",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1y",
+              "text": "Correo",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-1z",
+              "text": "Teléfono",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-20",
+              "text": "Dirección",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-21",
+              "text": "Imagen de la cédula",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-22",
+              "text": "Certificación bancaria",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-23",
+              "text": "Seguros vigentes",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-16",
+          "step": 5,
+          "title": "Documentos del vehículo",
+          "kind": "documento",
+          "x": 400,
+          "y": 460,
+          "notes": "Carro nuevo, por placa. En el vidrio la tarjeta de operación y la tarjeta de propiedad van con asterisco: no siguen sin eso.",
+          "items": [
+            {
+              "id": "i-mv687rzt-24",
+              "text": "Tarjeta de operación",
+              "done": false,
+              "required": true
+            },
+            {
+              "id": "i-mv687rzt-25",
+              "text": "Tarjeta de propiedad",
+              "done": false,
+              "required": true
+            },
+            {
+              "id": "i-mv687rzt-26",
+              "text": "Tarjetón",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-27",
+              "text": "SOAT",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-28",
+              "text": "Tecnomecánica",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-17",
+          "step": 6,
+          "title": "¿Es el propietario?",
+          "kind": "decision",
+          "x": 768,
+          "y": 80,
+          "notes": "El conductor puede ser el dueño u otra persona. Si es el dueño, sigue la fórmula. Si es otro, queda marcado y no se firma todavía.",
+          "items": [
+            {
+              "id": "i-mv687rzt-29",
+              "text": "Sí: propietario → fórmula, firma y login",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2a",
+              "text": "No / es otro → caso por revisar",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-18",
+          "step": 7,
+          "title": "Caso por revisar",
+          "kind": "decision",
+          "x": 768,
+          "y": 300,
+          "notes": "En el vidrio está como «No X ?». No avanzar a firma hasta dejar claro quién maneja y quién es el dueño.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-19",
+          "step": 8,
+          "title": "Fórmula y firma",
+          "kind": "paso",
+          "x": 768,
+          "y": 500,
+          "notes": "Camino del sí: fórmula, firma del contrato y acceso. Anotar quién firma.",
+          "items": [
+            {
+              "id": "i-mv687rzt-2b",
+              "text": "Fórmula",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2c",
+              "text": "Firma del contrato",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2d",
+              "text": "Login",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2e",
+              "text": "Firmantes",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2f",
+              "text": "Contacto firmado",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-1a",
+          "step": 9,
+          "title": "Cita presencial",
+          "kind": "paso",
+          "x": 768,
+          "y": 820,
+          "notes": "Cuando el contacto ya firmó y toca verse en la sede.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-1b",
+          "step": 10,
+          "title": "Carta de cancelación",
+          "kind": "documento",
+          "x": 768,
+          "y": 1000,
+          "notes": "Si viene de otra empresa o ya tenía póliza, pedir la carta. En el vidrio sale junto al contacto firmado y otra vez dentro de vincula.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-1c",
+          "step": 11,
+          "title": "Vinculación",
+          "kind": "paso",
+          "x": 1136,
+          "y": 36,
+          "notes": "Núcleo del trámite. Si ya tenía contrato, no se crea desde cero: se actualiza vendedor y propietario en el SAO.",
+          "items": [
+            {
+              "id": "i-mv687rzt-2g",
+              "text": "Contrato previo",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2h",
+              "text": "SAO del carro",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2i",
+              "text": "Actualizar vendedor y propietario",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2j",
+              "text": "Carta de cancelación",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-1d",
+          "step": 12,
+          "title": "Retenciones",
+          "kind": "paso",
+          "x": 1136,
+          "y": 360,
+          "notes": "Van en su propio recuadro, aparte de la vinculación. Revisarlas antes de cerrar.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-1e",
+          "step": 13,
+          "title": "Call center",
+          "kind": "paso",
+          "x": 1136,
+          "y": 540,
+          "notes": "De vinculación pasa a call center y de ahí a Viaseguros.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-1f",
+          "step": 14,
+          "title": "Link de pago",
+          "kind": "paso",
+          "x": 1136,
+          "y": 730,
+          "notes": "El link reparte el cobro. No es un solo canal.",
+          "items": [
+            {
+              "id": "i-mv687rzt-2k",
+              "text": "Cajas",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2l",
+              "text": "Cuenta bancaria",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2m",
+              "text": "Viaseguros",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-1g",
+          "step": 15,
+          "title": "Viaseguros",
+          "kind": "persona",
+          "x": 1504,
+          "y": 36,
+          "notes": "Seguro del carro. Call center los deja enterados antes del pago.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-1h",
+          "step": 16,
+          "title": "Verificar SAO",
+          "kind": "decision",
+          "x": 1504,
+          "y": 230,
+          "notes": "En el vidrio: verificar SAO y solo después pago de pólizas. Si el SAO no cuadra, no se cobra.",
+          "items": []
+        },
+        {
+          "id": "n-mv687rzt-1i",
+          "step": 17,
+          "title": "Pago de pólizas",
+          "kind": "paso",
+          "x": 1504,
+          "y": 440,
+          "notes": "Cobro de la póliza nueva. Si había una anterior, cancelarla en este mismo paso. De aquí sigue la bienvenida.",
+          "items": [
+            {
+              "id": "i-mv687rzt-2n",
+              "text": "Pago de la póliza",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2o",
+              "text": "Cancelar póliza anterior",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-1j",
+          "step": 18,
+          "title": "Opera · Claudia",
+          "kind": "persona",
+          "x": 1504,
+          "y": 680,
+          "notes": "Operaciones. Claudia deja la tarjeta de operación, actualiza la empresa y pasa por SAC.",
+          "items": [
+            {
+              "id": "i-mv687rzt-2p",
+              "text": "Tarjeta de operación",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2q",
+              "text": "Actualizar empresa",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2r",
+              "text": "SAC",
+              "done": false
+            }
+          ]
+        },
+        {
+          "id": "n-mv687rzt-1k",
+          "step": 19,
+          "title": "Kit de bienvenida",
+          "kind": "paso",
+          "x": 1504,
+          "y": 960,
+          "notes": "Cierre con el afiliado: lo que se le entrega cuando ya quedó vinculado.",
+          "items": [
+            {
+              "id": "i-mv687rzt-2s",
+              "text": "Distintivos (bono)",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2t",
+              "text": "Certificado",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2u",
+              "text": "Meses de rodamiento",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2v",
+              "text": "Rodamiento",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2w",
+              "text": "Beneficios",
+              "done": false
+            },
+            {
+              "id": "i-mv687rzt-2x",
+              "text": "Padrino",
+              "done": false
+            }
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-mv687rzt-2y",
+          "from": "n-mv687rzt-12",
+          "to": "n-mv687rzt-13",
+          "label": "llega"
+        },
+        {
+          "id": "e-mv687rzt-2z",
+          "from": "n-mv687rzt-13",
+          "to": "n-mv687rzt-15",
+          "label": "persona"
+        },
+        {
+          "id": "e-mv687rzt-30",
+          "from": "n-mv687rzt-13",
+          "to": "n-mv687rzt-16",
+          "label": "placa"
+        },
+        {
+          "id": "e-mv687rzt-31",
+          "from": "n-mv687rzt-13",
+          "to": "n-mv687rzt-14",
+          "label": ""
+        },
+        {
+          "id": "e-mv687rzt-32",
+          "from": "n-mv687rzt-15",
+          "to": "n-mv687rzt-17",
+          "label": "listo"
+        },
+        {
+          "id": "e-mv687rzt-33",
+          "from": "n-mv687rzt-16",
+          "to": "n-mv687rzt-17",
+          "label": "documentos"
+        },
+        {
+          "id": "e-mv687rzt-34",
+          "from": "n-mv687rzt-14",
+          "to": "n-mv687rzt-17",
+          "label": ""
+        },
+        {
+          "id": "e-mv687rzt-35",
+          "from": "n-mv687rzt-17",
+          "to": "n-mv687rzt-19",
+          "label": "Sí, es dueño"
+        },
+        {
+          "id": "e-mv687rzt-36",
+          "from": "n-mv687rzt-17",
+          "to": "n-mv687rzt-18",
+          "label": "No / es otro"
+        },
+        {
+          "id": "e-mv687rzt-37",
+          "from": "n-mv687rzt-18",
+          "to": "n-mv687rzt-1c",
+          "label": "ya quedó claro"
+        },
+        {
+          "id": "e-mv687rzt-38",
+          "from": "n-mv687rzt-19",
+          "to": "n-mv687rzt-1a",
+          "label": "presencial"
+        },
+        {
+          "id": "e-mv687rzt-39",
+          "from": "n-mv687rzt-19",
+          "to": "n-mv687rzt-1b",
+          "label": "firmado"
+        },
+        {
+          "id": "e-mv687rzt-3a",
+          "from": "n-mv687rzt-19",
+          "to": "n-mv687rzt-1c",
+          "label": "contrato"
+        },
+        {
+          "id": "e-mv687rzt-3b",
+          "from": "n-mv687rzt-1c",
+          "to": "n-mv687rzt-1d",
+          "label": ""
+        },
+        {
+          "id": "e-mv687rzt-3c",
+          "from": "n-mv687rzt-1c",
+          "to": "n-mv687rzt-1e",
+          "label": ""
+        },
+        {
+          "id": "e-mv687rzt-3d",
+          "from": "n-mv687rzt-1e",
+          "to": "n-mv687rzt-1g",
+          "label": ""
+        },
+        {
+          "id": "e-mv687rzt-3e",
+          "from": "n-mv687rzt-1c",
+          "to": "n-mv687rzt-1f",
+          "label": "cobro"
+        },
+        {
+          "id": "e-mv687rzt-3f",
+          "from": "n-mv687rzt-1f",
+          "to": "n-mv687rzt-1h",
+          "label": ""
+        },
+        {
+          "id": "e-mv687rzt-3g",
+          "from": "n-mv687rzt-1h",
+          "to": "n-mv687rzt-1i",
+          "label": "SAO ok"
+        },
+        {
+          "id": "e-mv687rzt-3h",
+          "from": "n-mv687rzt-1b",
+          "to": "n-mv687rzt-1i",
+          "label": "póliza anterior"
+        },
+        {
+          "id": "e-mv687rzt-3i",
+          "from": "n-mv687rzt-1i",
+          "to": "n-mv687rzt-1j",
+          "label": "bienvenida"
+        },
+        {
+          "id": "e-mv687rzt-3j",
+          "from": "n-mv687rzt-1j",
+          "to": "n-mv687rzt-1k",
+          "label": "entrega"
+        }
+      ]
+    }
+  ],
+  "activeId": "b-vincula"
+}
