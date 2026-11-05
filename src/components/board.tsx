@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Bell, BookOpen, CalendarDays, Clock, Download, ExternalLink, FileSpreadsheet, FileText, Flag, Folder, KeyRound, LayoutList, LogOut, MessageCircle, Phone, Plus, ScrollText, Search, Users, X } from "lucide-react";
+import { Bell, BookOpen, CalendarDays, Clock, Download, ExternalLink, FileSpreadsheet, FileText, Flag, Folder, KeyRound, LayoutList, LogOut, MessageCircle, Phone, Plus, ScrollText, Search, Upload, Users, X } from "lucide-react";
 import { signOut } from "@/lib/auth/client";
 import { listAgenda } from "@/lib/agenda.functions";
 import { type AgendaItem } from "@/lib/agenda";
@@ -29,6 +29,7 @@ import {
   createCaso,
   exportarExcel,
   exportarTodo,
+  cargarRespaldo,
   getMe,
   leerContrato,
   listCasos,
@@ -328,6 +329,31 @@ export function Board() {
     return bajarArchivo(exportarTodo);
   }
 
+  async function cargarTodo(file: File) {
+    if (file.size > 18 * 1024 * 1024) {
+      setError("Ese respaldo pesa más de 18 MB");
+      return;
+    }
+    const seguir = window.confirm(
+      "Esto escribe encima de procesos, personas, agenda, metas, bitácora y control con lo que traiga el archivo. No borra lo que el archivo no traiga. Los PDF siguen en Drive. ¿Cargar el respaldo?",
+    );
+    if (!seguir) return;
+    setExportando(true);
+    setError("");
+    try {
+      const archivo = await aBase64(file);
+      const listo = await cargarRespaldo({ data: archivo });
+      await load();
+      setError(
+        `Respaldo cargado: ${listo.procesos} procesos, ${listo.personas} personas, ${listo.bitacoras} bitácoras, ${listo.agenda} citas.${listo.saltados ? ` ${listo.saltados} filas no tenían usuario y se dejaron quietas.` : ""}`,
+      );
+    } catch (err) {
+      setError(fallo(err));
+    } finally {
+      setExportando(false);
+    }
+  }
+
   function elegirModo(next: "mio" | "equipo") {
     setModo(next);
     window.localStorage.setItem("vl-modo", next);
@@ -459,8 +485,24 @@ export function Board() {
               className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper disabled:opacity-60"
             >
               <Download className="size-4" />
-              {exportando ? "Armando…" : "Todo"}
+              {exportando ? "Armando…" : "Bajar respaldo"}
             </button>
+            {soyDavid ? (
+              <label className="flex h-11 cursor-pointer items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper">
+                <Upload className="size-4" />
+                {exportando ? "Cargando…" : "Cargar respaldo"}
+                <input
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) void cargarTodo(file);
+                  }}
+                />
+              </label>
+            ) : null}
             </>
           ) : null}
           {archivos && soyDavid ? (
@@ -604,8 +646,24 @@ export function Board() {
                 className="inline-flex h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm disabled:opacity-60"
               >
                 <Download className="size-4" />
-                {exportando ? "Armando…" : "Todo"}
+                {exportando ? "Armando…" : "Bajar respaldo"}
               </button>
+              {soyDavid ? (
+                <label className="inline-flex h-10 cursor-pointer items-center gap-1 rounded-xl border border-line px-3 text-sm">
+                  <Upload className="size-4" />
+                  {exportando ? "Cargando…" : "Cargar respaldo"}
+                  <input
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    className="sr-only"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void cargarTodo(file);
+                    }}
+                  />
+                </label>
+              ) : null}
               </>
             ) : null}
             {archivos && soyDavid ? (
@@ -688,7 +746,7 @@ export function Board() {
                 ))}
               </select>
             ) : null}
-            {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
+            {error ? <p className={"mb-3 text-sm " + (error.startsWith("Respaldo cargado") ? "text-ink" : "text-danger")}>{error}</p> : null}
             <AgendaView
               me={me}
               items={agendaVista}

@@ -500,3 +500,39 @@ export async function armarRespaldo(hojas: { nombre: string; filas: Record<strin
     base64: Buffer.from(buffer).toString("base64"),
   };
 }
+
+function textoCelda(valor: unknown): string {
+  if (valor == null) return "";
+  if (valor instanceof Date) return valor.toISOString();
+  if (typeof valor === "object") {
+    const caja = valor as { text?: string; result?: unknown };
+    if (typeof caja.text === "string") return caja.text;
+    if ("result" in caja) return textoCelda(caja.result);
+    return "";
+  }
+  return String(valor);
+}
+
+export async function leerRespaldo(archivo: string) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(archivo, "base64") as unknown as Buffer);
+  const hojas: Record<string, Record<string, string>[]> = {};
+  for (const sheet of wb.worksheets) {
+    const encabezado = (sheet.getRow(1).values as unknown[]).slice(1).map((item) => textoCelda(item).trim());
+    const filas: Record<string, string>[] = [];
+    sheet.eachRow((row, numero) => {
+      if (numero === 1) return;
+      const fila: Record<string, string> = {};
+      let llena = false;
+      encabezado.forEach((columna, indice) => {
+        if (!columna || columna === "sin registros") return;
+        const valor = textoCelda(row.getCell(indice + 1).value).trim();
+        if (valor) llena = true;
+        fila[columna] = valor;
+      });
+      if (llena) filas.push(fila);
+    });
+    hojas[sheet.name] = filas;
+  }
+  return hojas;
+}

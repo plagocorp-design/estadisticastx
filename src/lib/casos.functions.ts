@@ -577,7 +577,7 @@ export const exportarTodo = createServerFn({ method: "GET" })
                 c.mano, c.via_estado, c.via_enlace, c.via_nota, c.via_pide_carta, c.via_pide_contrato,
                 c.op_polizas, c.op_impreso, c.op_pedido, c.op_tarjeta, c.docs_ocultos, c.servicio_nota,
                 c.bonos, c.beneficios, c.mano_asignado, c.devolucion, c.area_marcas, c.via_atencion,
-                c.copropietarios, p.name as asesor, p.slug as usuario
+                c.copropietarios, c.cita_fecha, c.cita_hora, c.entrega, p.name as asesor, p.slug as usuario
          from casos c left join profiles p on p.user_id = c.owner_id
          order by c.id`,
       ),
@@ -608,7 +608,7 @@ export const exportarTodo = createServerFn({ method: "GET" })
       ),
       await leer(
         "Chat",
-        `select m.id, m.caso_id, c.placa, p.name as autor, m.body, m.created_at
+        `select m.id, m.caso_id, c.placa, m.author_id, p.name as autor, m.body, m.created_at
          from mensajes m
          left join casos c on c.id = m.caso_id
          left join profiles p on p.user_id = m.author_id
@@ -617,14 +617,15 @@ export const exportarTodo = createServerFn({ method: "GET" })
       await leer("Auditoria", `select * from auditoria order by id`),
       await leer(
         "Documentos",
-        `select d.id, d.caso_id, c.placa, d.tipo, d.nombre, d.archivo, d.subido_por, d.created_at
+        `select d.id, d.caso_id, c.placa, d.tipo, d.nombre, d.subido_por, d.drive_id, d.lectura, d.created_at,
+                case when coalesce(d.archivo, '') <> '' then 'Sí' else 'No' end as tiene_archivo
          from documentos d left join casos c on c.id = d.caso_id
          order by d.id`,
       ),
       await leer("Sobres", `select s.*, c.placa from sobres s left join casos c on c.id = s.caso_id order by s.id`),
       await leer(
         "Firmantes",
-        `select f.id, f.sobre_id, f.orden, f.nombre, f.cc, f.correo, f.firmado_at,
+        `select f.id, f.sobre_id, f.orden, f.nombre, f.cc, f.correo, f.token, f.firmado_at,
                 case when coalesce(f.firma, '') <> '' then 'Sí' else 'No' end as firmo
          from firmantes f order by f.sobre_id, f.orden`,
       ),
@@ -632,6 +633,246 @@ export const exportarTodo = createServerFn({ method: "GET" })
     ];
     const { armarRespaldo } = await import("./excel.server");
     return armarRespaldo(hojas);
+  });
+
+const CASO_TEXTO = [
+  "placa", "cc", "nombre", "telefono", "empresa", "fecha_inicio", "estado_tarjeta", "observacion", "proxima", "fecha_proxima",
+  "direccion", "correo", "marca", "linea", "modelo", "fecha_firma", "contrato_nombre", "fecha_poliza", "origen", "motivo_cierre",
+  "fecha_cierre", "fecha_compra", "poliza_fase", "poliza_entrega", "docuseal_id", "docuseal_estado", "auditoria_nombre", "mano",
+  "via_estado", "via_enlace", "via_nota", "op_pedido", "op_tarjeta", "docs_ocultos", "servicio_nota", "bonos", "beneficios",
+  "mano_asignado", "devolucion", "area_marcas", "via_atencion", "copropietarios", "cita_fecha", "cita_hora", "entrega",
+];
+const CASO_SI = [
+  "dijo_si", "cedula", "tarjeta_propiedad", "tarjeta_operacion", "soat", "tecnomecanica", "formulario", "documentos",
+  "firma_carta", "firma_contrato", "plata_poliza", "via_seguros", "polizas_subidas", "operativa", "tarjeta_entregada",
+  "completado", "via_pide_carta", "via_pide_contrato", "op_polizas", "op_impreso",
+];
+
+function esSi(valor: string) {
+  const s = valor.trim().toLowerCase();
+  return s === "sí" || s === "si" || s === "true" || s === "1" || s === "t";
+}
+
+function entero(valor: string, vacio: number | null = 0) {
+  if (!valor.trim()) return vacio;
+  const n = Number(valor);
+  return Number.isFinite(n) ? Math.trunc(n) : vacio;
+}
+
+async function guardarFila(
+  sql: Awaited<ReturnType<typeof getSql>>,
+  tabla: string,
+  conflicto: string[],
+  columnas: { nombre: string; valor: unknown }[],
+  conservar: string[] = [],
+) {
+  const nombres = columnas.map((columna) => columna.nombre);
+  const valores = columnas.map((columna) => columna.valor);
+  const marcas = nombres.map((_, i) => `$${i + 1}`).join(", ");
+  const cambia = nombres
+    .filter((nombre) => !conflicto.includes(nombre) && !conservar.includes(nombre))
+    .map((nombre) => `${nombre} = excluded.${nombre}`);
+  const accion = cambia.length ? `do update set ${cambia.join(", ")}` : "do nothing";
+  await sql.query(
+    `insert into ${tabla} (${nombres.join(", ")}) values (${marcas}) on conflict (${conflicto.join(", ")}) ${accion}`,
+    valores,
+  );
+}
+
+export const cargarRespaldo = createServerFn({ method: "POST" })
+  .validator((archivo: string) => {
+    if (!archivo || archivo.length < 80) throw new Error("El archivo llegó vacío");
+    if (archivo.length > 25_000_000) throw new Error("Ese respaldo pesa más de lo que se puede cargar de una vez");
+    return archivo;
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data: archivo }) => {
+    const { profileFor } = await import("./team.server");
+    const profile = await profileFor(context.userId);
+    if (!profile || !configura(profile.role)) throw new Error("Solo el líder carga un respaldo");
+    const { leerRespaldo } = await import("./excel.server");
+    const hojas = await leerRespaldo(archivo);
+    if (!hojas.Procesos?.length) throw new Error("Ese archivo no es un respaldo de Vincula Libre");
+    const sql = await getSql();
+    const usuarios = new Set(
+      (await sql.query<{ id: string }>(`select id from "user"`)).map((fila) => fila.id),
+    );
+    const casos = new Set((await sql.query<{ id: number }>(`select id from casos`)).map((fila) => Number(fila.id)));
+    let procesos = 0;
+    let saltados = 0;
+    for (const fila of hojas.Procesos) {
+      const id = entero(fila.id, null);
+      const owner = fila.owner_id;
+      if (!id || !owner || !usuarios.has(owner)) {
+        saltados += 1;
+        continue;
+      }
+      const columnas: { nombre: string; valor: unknown }[] = [
+        { nombre: "id", valor: id },
+        { nombre: "owner_id", valor: owner },
+        ...CASO_TEXTO.map((nombre) => ({ nombre, valor: fila[nombre] ?? "" })),
+        ...CASO_SI.map((nombre) => ({ nombre, valor: esSi(fila[nombre] ?? "") })),
+      ];
+      await guardarFila(sql, "casos", ["id"], columnas);
+      casos.add(id);
+      procesos += 1;
+    }
+    await sql.query(`select setval(pg_get_serial_sequence('casos','id'), coalesce((select max(id) from casos), 1))`);
+
+    let personas = 0;
+    for (const fila of hojas.Personas ?? []) {
+      if (!fila.user_id || !usuarios.has(fila.user_id)) continue;
+      if (fila.slug && fila.name && ["asesor", "lider", "coordinadora", "via_seguros", "operativa", "servicio"].includes(fila.role)) {
+        await sql.query(`update profiles set slug = $1, name = $2, role = $3 where user_id = $4`, [
+          fila.slug, fila.name, fila.role, fila.user_id,
+        ]);
+      }
+      if (fila.clave) {
+        await sql.query(
+          `insert into claves_equipo (user_id, clave) values ($1, $2) on conflict (user_id) do update set clave = excluded.clave, updated_at = now()`,
+          [fila.user_id, fila.clave],
+        );
+      }
+      personas += 1;
+    }
+
+    let bitacoras = 0;
+    for (const fila of hojas.Bitacoras ?? []) {
+      if (!fila.owner_id || !fila.fecha || !usuarios.has(fila.owner_id)) continue;
+      await guardarFila(sql, "bitacoras", ["owner_id", "fecha"], [
+        { nombre: "owner_id", valor: fila.owner_id },
+        { nombre: "fecha", valor: fila.fecha.slice(0, 10) },
+        { nombre: "modo", valor: fila.modo ?? "" },
+        { nombre: "zonas", valor: fila.zonas ?? "" },
+        { nombre: "llamadas", valor: entero(fila.llamadas ?? "") },
+        { nombre: "visitas", valor: entero(fila.visitas ?? "") },
+        { nombre: "dijo_si", valor: entero(fila.dijo_si ?? "") },
+        { nombre: "polizas", valor: entero(fila.polizas ?? "") },
+        { nombre: "que_hizo", valor: fila.que_hizo ?? "" },
+        { nombre: "detalle_call", valor: fila.detalle_call ?? "" },
+        { nombre: "detalle_calle", valor: fila.detalle_calle ?? "" },
+        { nombre: "trabas", valor: fila.trabas ?? "" },
+        { nombre: "manana", valor: fila.manana ?? "" },
+      ]);
+      bitacoras += 1;
+    }
+
+    let metas = 0;
+    for (const fila of hojas.Metas ?? []) {
+      if (!fila.owner_id || !fila.mes || !usuarios.has(fila.owner_id)) continue;
+      await guardarFila(sql, "metas_mes", ["mes", "owner_id"], [
+        { nombre: "mes", valor: fila.mes.slice(0, 7) },
+        { nombre: "owner_id", valor: fila.owner_id },
+        { nombre: "meta", valor: entero(fila.meta ?? "") },
+      ]);
+      metas += 1;
+    }
+    for (const fila of hojas["Dias meta"] ?? []) {
+      if (!fila.owner_id || !fila.fecha || !usuarios.has(fila.owner_id)) continue;
+      await guardarFila(sql, "dias_meta", ["fecha", "owner_id"], [
+        { nombre: "fecha", valor: fila.fecha.slice(0, 10) },
+        { nombre: "owner_id", valor: fila.owner_id },
+        { nombre: "cuenta", valor: entero(fila.cuenta ?? "", 1) },
+      ]);
+    }
+
+    let agenda = 0;
+    for (const fila of hojas.Agenda ?? []) {
+      const id = entero(fila.id, null);
+      const casoId = entero(fila.caso_id ?? "", null);
+      if (!id || !fila.owner_id || !usuarios.has(fila.owner_id) || !(fila.fecha || "").slice(0, 10)) continue;
+      const tipo = ["visita", "llamada", "escribir", "otro"].includes(fila.tipo) ? fila.tipo : "otro";
+      await guardarFila(sql, "agenda", ["id"], [
+        { nombre: "id", valor: id },
+        { nombre: "owner_id", valor: fila.owner_id },
+        { nombre: "caso_id", valor: casoId && casos.has(casoId) ? casoId : null },
+        { nombre: "tipo", valor: tipo },
+        { nombre: "titulo", valor: fila.titulo || "Cita" },
+        { nombre: "fecha", valor: (fila.fecha || "").slice(0, 10) },
+        { nombre: "hora", valor: fila.hora ?? "" },
+        { nombre: "nota", valor: fila.nota ?? "" },
+        { nombre: "hecho", valor: esSi(fila.hecho ?? "") },
+      ]);
+      agenda += 1;
+    }
+
+    let control = 0;
+    for (const fila of hojas.Control ?? []) {
+      const id = entero(fila.id, null);
+      const casoId = entero(fila.caso_id ?? "", null);
+      if (!id || !fila.owner_id || !usuarios.has(fila.owner_id)) continue;
+      const tipos = ["ingreso", "salida", "break", "almuerzo", "visita", "otro"];
+      await guardarFila(sql, "control_marcas", ["id"], [
+        { nombre: "id", valor: id },
+        { nombre: "owner_id", valor: fila.owner_id },
+        { nombre: "tipo", valor: tipos.includes(fila.tipo) ? fila.tipo : "otro" },
+        { nombre: "fecha", valor: (fila.fecha || "").slice(0, 10) },
+        { nombre: "hora", valor: fila.hora || "00:00" },
+        { nombre: "hora_fin", valor: fila.hora_fin ?? "" },
+        { nombre: "caso_id", valor: casoId && casos.has(casoId) ? casoId : null },
+        { nombre: "nota", valor: fila.nota ?? "" },
+      ]);
+      control += 1;
+    }
+    for (const fila of hojas.Horarios ?? []) {
+      if (!fila.owner_id || !usuarios.has(fila.owner_id)) continue;
+      await guardarFila(sql, "equipo_extra", ["owner_id"], [
+        { nombre: "owner_id", valor: fila.owner_id },
+        { nombre: "activo", valor: entero(fila.activo ?? "", 1) },
+        { nombre: "empieza", valor: (fila.empieza || "2026-10-07").slice(0, 10) },
+        { nombre: "entrada", valor: fila.entrada || "08:00" },
+        { nombre: "salida", valor: fila.salida || "17:00" },
+      ]);
+    }
+
+    let documentos = 0;
+    for (const fila of hojas.Documentos ?? []) {
+      const id = entero(fila.id, null);
+      const casoId = entero(fila.caso_id ?? "", null);
+      if (!id || !casoId || !casos.has(casoId)) continue;
+      await guardarFila(sql, "documentos", ["id"], [
+        { nombre: "id", valor: id },
+        { nombre: "caso_id", valor: casoId },
+        { nombre: "tipo", valor: fila.tipo || "unificado" },
+        { nombre: "nombre", valor: fila.nombre || "archivo" },
+        { nombre: "archivo", valor: "" },
+        { nombre: "subido_por", valor: fila.subido_por ?? "" },
+        { nombre: "drive_id", valor: fila.drive_id ?? "" },
+        { nombre: "lectura", valor: fila.lectura ?? "" },
+      ], ["archivo"]);
+      documentos += 1;
+    }
+
+    let chat = 0;
+    for (const fila of hojas.Chat ?? []) {
+      const id = entero(fila.id, null);
+      const casoId = entero(fila.caso_id ?? "", null);
+      if (!id || !casoId || !casos.has(casoId) || !fila.author_id || !usuarios.has(fila.author_id) || !fila.body) continue;
+      await guardarFila(sql, "mensajes", ["id"], [
+        { nombre: "id", valor: id },
+        { nombre: "caso_id", valor: casoId },
+        { nombre: "author_id", valor: fila.author_id },
+        { nombre: "body", valor: fila.body },
+      ]);
+      chat += 1;
+    }
+
+    for (const tabla of ["agenda", "control_marcas", "documentos", "mensajes"]) {
+      try {
+        await sql.query(`select setval(pg_get_serial_sequence('${tabla}','id'), coalesce((select max(id) from ${tabla}), 1))`);
+      } catch {
+        /* la secuencia ya queda usable */
+      }
+    }
+
+    const { anotar } = await import("./auditoria.server");
+    await anotar(profile, {
+      accion: "cargo",
+      entidad: "respaldo",
+      detalle: `Cargó un respaldo: ${procesos} procesos, ${personas} personas, ${bitacoras} bitácoras, ${agenda} citas, ${control} marcas, ${documentos} documentos, ${chat} mensajes`,
+      etiqueta: "Respaldo",
+    });
+    return { procesos, personas, bitacoras, metas, agenda, control, documentos, chat, saltados };
   });
 
 export const listMetas = createServerFn({ method: "GET" })
