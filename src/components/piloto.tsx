@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Caso } from "@/lib/casos";
+import { ENTREGA, entregaIds } from "@/lib/casos";
 import {
   DOCS_PILOTO,
   MARCAS_OP,
@@ -14,7 +15,6 @@ import {
 } from "@/lib/piloto";
 import type { LecturaDoc } from "@/lib/ocr";
 import {
-  bajarDocumento,
   bajarPaquete,
   borrarDocumento,
   crearUsuarioBandeja,
@@ -24,13 +24,15 @@ import {
   listarDocumentos,
   leerDocumento,
   marcarArea,
+  marcarEntrega,
   marcarServicio,
   marcarVia,
   ocultarDocumento,
+  parteCarga,
+  parteDocumento,
   pasarMano,
   quitarUsuarioBandeja,
-  reemplazarDocumento,
-  subirDocumento,
+  recibirTrozo,
   tableroPiloto,
   tomarProceso,
   guardarDevolucion,
@@ -39,21 +41,20 @@ import {
   type PilotoEstado,
 } from "@/lib/piloto.functions";
 import { configura, esBandeja, etiquetaRol, llevaProcesos, type Role } from "@/lib/team.public";
+import { enviarEnTrozos, prepararArchivo, traerPorTrozos, TOPE_ENVIO } from "@/lib/archivo";
 
 function fallo(err: unknown) {
   return err instanceof Error ? err.message : "No se pudo guardar";
 }
 
-function aBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const raw = String(reader.result ?? "");
-      resolve(raw.includes(",") ? raw.split(",")[1] : raw);
-    };
-    reader.onerror = () => reject(new Error("No pude abrir el archivo"));
-    reader.readAsDataURL(file);
+async function traerDocumento(id: number) {
+  const primero = await parteDocumento({ data: { id, desde: 0 } });
+  const archivo = await traerPorTrozos(primero.total, async (desde) => {
+    if (desde === 0) return primero.datos;
+    const parte = await parteDocumento({ data: { id, desde } });
+    return parte.datos;
   });
+  return { nombre: primero.nombre, archivo };
 }
 
 function whatsApp(telefono: string, texto: string) {
@@ -286,6 +287,7 @@ export function BloquePiloto({
   onListo,
   onError,
   soloDocs = false,
+  soloTipos,
 }: {
   caso: Caso;
   rol: string;
@@ -295,6 +297,7 @@ export function BloquePiloto({
   onListo: () => void;
   onError: (msg: string) => void;
   soloDocs?: boolean;
+  soloTipos?: string[];
 }) {
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [tipo, setTipo] = useState("cedula");
@@ -306,11 +309,14 @@ export function BloquePiloto({
   const [beneficios, setBeneficios] = useState(caso.beneficios.split(",").filter(Boolean));
   const [devolucion, setDevolucion] = useState(caso.devolucion);
   const [marcas, setMarcas] = useState<string[]>(marcasDe(caso.areaMarcas));
+  const [entrega, setEntrega] = useState(caso.entrega || "");
   const [copiado, setCopiado] = useState(false);
   const [linea, setLinea] = useState<{ actor: string; detalle: string; cuando: string }[]>([]);
   const [ocupado, setOcupado] = useState(false);
   const [vista, setVista] = useState<{ id: number; nombre: string; archivo: string } | null>(null);
   const [lectura, setLectura] = useState<LecturaDoc | null>(null);
+  const tiposSubida = (soloTipos ?? DOCS_PILOTO.map((doc) => doc.id)).filter((id) => id !== "unificado");
+  const docsVisibles = soloTipos ? docs.filter((doc) => soloTipos.includes(doc.tipo)) : docs;
   const lider = configura(rol);
   const asesor = llevaProcesos(rol);
   const sube = lider || (asesor && !esBandeja(rol));
@@ -328,7 +334,8 @@ export function BloquePiloto({
 
   useEffect(() => {
     setMarcas(marcasDe(caso.areaMarcas));
-  }, [caso.id, caso.areaMarcas]);
+    setEntrega(caso.entrega || "");
+  }, [caso.id, caso.areaMarcas, caso.entrega]);
 
   if (!activo && !soloDocs) return null;
 
@@ -362,14 +369,29 @@ export function BloquePiloto({
     });
   }
 
+  async function tocarEntrega(marca: string, on: boolean) {
+    await correr(async () => {
+      const listo = await marcarEntrega({ data: { id: caso.id, marca, on } });
+      setEntrega(listo.entrega);
+      onCaso({ entrega: listo.entrega });
+    });
+  }
+
   async function subir(file: File) {
     if (file.size > 30 * 1024 * 1024) {
       onError("El archivo pesa más de 30 MB");
       return;
     }
-    const elegido = modo === "paquete" ? "unificado" : tipo === "unificado" ? "cedula" : tipo;
+    const elegido =
+      soloTipos && !soloTipos.includes("unificado")
+        ? tiposSubida.includes(tipo) ? tipo : tiposSubida[0] || "autorizacion"
+        : modo === "paquete"
+          ? "unificado"
+          : tipo === "unificado"
+            ? "cedula"
+            : tipo;
     await correr(async () => {
-      const archivo = await aBase64(file);
+      const listo = await prepararArchivo(file);
       const actual = {
         placa: caso.placa,
         cc: caso.cc,
@@ -383,12 +405,28 @@ export function BloquePiloto({
         empresa: caso.empresa,
       };
       let leida: LecturaDoc | null = null;
-      try {
-        leida = await leerDocumento({ data: { tipo: elegido, nombre: file.name, archivo, actual } });
-      } catch {
-        leida = null;
+      if (listo.archivo.length <= TOPE_ENVIO) {
+        try {
+          leida = await leerDocumento({ data: { tipo: elegido, nombre: listo.nombre, archivo: listo.archivo, actual } });
+        } catch {
+          leida = null;
+        }
       }
-      await subirDocumento({ data: { casoId: caso.id, tipo: elegido, nombre: file.name, archivo, lectura: leida ? JSON.stringify(leida) : "" } });
+      const cargaId = crypto.randomUUID();
+      await enviarEnTrozos(listo.archivo, async (orden, datos, fin) => {
+        await recibirTrozo({
+          data: {
+            cargaId,
+            orden,
+            datos,
+            fin,
+            casoId: caso.id,
+            tipo: elegido,
+            nombre: listo.nombre,
+            lectura: leida ? JSON.stringify(leida) : "",
+          },
+        });
+      });
       if (elegido === "comprobante" && caso.mano === "via") onCaso({ viaEstado: "comprobante" });
       if (elegido !== "comprobante") onCaso({ documentos: true });
       setLectura(leida);
@@ -397,13 +435,18 @@ export function BloquePiloto({
   }
 
   async function abrir(doc: DocItem) {
-    const file = await bajarDocumento({ data: doc.id });
+    const file = await traerDocumento(doc.id);
     setVista({ id: doc.id, nombre: file.nombre, archivo: file.archivo });
   }
 
-  async function girar(id: number, nombre: string, archivo: string) {
+  async function girar(id: number, tipoDoc: string, nombre: string, archivo: string) {
     const nuevo = await girarArchivo(nombre, archivo);
-    await reemplazarDocumento({ data: { id, archivo: nuevo, motivo: "giro" } });
+    const cargaId = crypto.randomUUID();
+    await enviarEnTrozos(nuevo, async (orden, datos, fin) => {
+      await recibirTrozo({
+        data: { cargaId, orden, datos, fin, casoId: caso.id, tipo: tipoDoc, nombre, reemplazaId: id },
+      });
+    });
     setVista({ id, nombre, archivo: nuevo });
     await cargar();
   }
@@ -419,8 +462,13 @@ export function BloquePiloto({
       onError("El archivo pesa más de 30 MB");
       return;
     }
-    const archivo = await aBase64(file);
-    await reemplazarDocumento({ data: { id, archivo, motivo: "cambio" } });
+    const listo = await prepararArchivo(file);
+    const cargaId = crypto.randomUUID();
+    await enviarEnTrozos(listo.archivo, async (orden, datos, fin) => {
+      await recibirTrozo({
+        data: { cargaId, orden, datos, fin, casoId: caso.id, tipo, nombre: listo.nombre, reemplazaId: id },
+      });
+    });
     setVista(null);
     await cargar();
   }
@@ -503,7 +551,10 @@ export function BloquePiloto({
               onClick={() =>
                 void correr(async () => {
                   const file = await bajarPaquete({ data: caso.id });
-                  bajar(file.nombre, file.archivo);
+                  const archivo = file.archivo || (file.cargaId
+                    ? await traerPorTrozos(file.total, async (desde) => (await parteCarga({ data: { cargaId: file.cargaId, desde } })).datos)
+                    : "");
+                  bajar(file.nombre, archivo);
                 })
               }
               className="h-10 w-fit rounded-2xl border border-line bg-card px-3 text-sm font-semibold disabled:opacity-60"
@@ -514,10 +565,12 @@ export function BloquePiloto({
           {sube ? (
             <div className="grid gap-2">
               <div className="flex flex-wrap gap-2">
+                {!soloTipos || soloTipos.includes("unificado") ? (
                 <button type="button" onClick={() => setModo("paquete")} className={`h-10 rounded-2xl px-3 text-sm font-semibold ${modo === "paquete" ? "bg-navy text-paper" : "border border-line bg-card"}`}>
                   Paquete completo
                 </button>
-                <button type="button" onClick={() => setModo("uno")} className={`h-10 rounded-2xl px-3 text-sm font-semibold ${modo === "uno" ? "bg-navy text-paper" : "border border-line bg-card"}`}>
+                ) : null}
+                <button type="button" onClick={() => setModo("uno")} className={`h-10 rounded-2xl px-3 text-sm font-semibold ${modo === "uno" || (soloTipos && !soloTipos.includes("unificado")) ? "bg-navy text-paper" : "border border-line bg-card"}`}>
                   Uno por uno
                 </button>
               </div>
@@ -529,7 +582,7 @@ export function BloquePiloto({
               <div className="flex flex-wrap gap-2">
                 {modo === "uno" ? (
                   <select value={tipo === "unificado" ? "cedula" : tipo} onChange={(e) => setTipo(e.target.value)} className="h-11 rounded-2xl border border-line bg-card px-3 text-sm">
-                    {DOCS_PILOTO.filter((doc) => doc.id !== "unificado").map((doc) => (
+                    {DOCS_PILOTO.filter((doc) => doc.id !== "unificado" && tiposSubida.includes(doc.id)).map((doc) => (
                       <option key={doc.id} value={doc.id}>{doc.label}</option>
                     ))}
                   </select>
@@ -591,7 +644,7 @@ export function BloquePiloto({
             </div>
           ) : null}
           <ul className="grid gap-2">
-            {docs.map((doc) => (
+            {docsVisibles.map((doc) => (
               <li key={doc.id} className="grid gap-1 rounded-2xl border border-line bg-card px-3 py-2 text-sm">
                 <button type="button" className="text-left font-semibold text-navy" onClick={() => void correr(() => abrir(doc))}>
                   {etiquetaDoc(doc.tipo)} · {doc.nombre}
@@ -612,8 +665,8 @@ export function BloquePiloto({
                         type="button"
                         className="h-9 rounded-xl border border-line px-3"
                         onClick={() => void correr(async () => {
-                          const file = await bajarDocumento({ data: doc.id });
-                          await girar(doc.id, file.nombre, file.archivo);
+                          const file = await traerDocumento(doc.id);
+                          await girar(doc.id, doc.tipo, file.nombre, file.archivo);
                         })}
                       >
                         Girar
@@ -654,7 +707,7 @@ export function BloquePiloto({
                 ) : null}
               </li>
             ))}
-            {docs.length === 0 ? <li className="text-sm text-ink-soft">Todavía no hay archivos. Sube el paquete completo o cada documento por separado.</li> : null}
+            {docsVisibles.length === 0 ? <li className="text-sm text-ink-soft">Todavía no hay archivos. Sube el paquete completo o cada documento por separado.</li> : null}
           </ul>
           {vista ? (
             <div className="fixed inset-0 z-40 grid place-items-center bg-ink/50 p-4" onClick={() => setVista(null)}>
@@ -673,7 +726,7 @@ export function BloquePiloto({
                   </button>
                   {sube ? (
                     <>
-                      <button type="button" className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold" onClick={() => void correr(() => girar(vista.id, vista.nombre, vista.archivo))}>
+                      <button type="button" className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold" onClick={() => void correr(() => girar(vista.id, docs.find((doc) => doc.id === vista.id)?.tipo || "cedula", vista.nombre, vista.archivo))}>
                         Girar
                       </button>
                       <button type="button" className="h-10 rounded-2xl px-3 text-sm font-semibold text-danger" onClick={() => void correr(() => quitar(vista.id))}>
@@ -774,16 +827,41 @@ export function BloquePiloto({
       ) : null}
 
       {esOp ? (
+        <>
         <Marcas items={MARCAS_OP} activas={marcas} disabled={ocupado} onToggle={tocar} />
+        {marcas.includes("tarjeta_recibida") || caso.estadoTarjeta === "Expedida" || caso.tarjetaEntregada ? (
+          <>
+          <p className="text-sm text-ink-soft">
+            {caso.citaFecha ? `Cita de entrega: ${caso.citaFecha}${caso.citaHora ? ` a las ${caso.citaHora}` : ""}.` : "El asesor todavía no pone la cita."}
+          </p>
+          <EntregaMarcas
+            titulo="Entrega de la tarjeta"
+            ids={["carta", "tarjeta_nueva", "tarjeton"]}
+            entrega={entrega}
+            disabled={ocupado}
+            onToggle={tocarEntrega}
+          />
+          </>
+        ) : null}
+        </>
       ) : null}
 
       {esServicioRol ? (
         <div className="grid gap-2">
+          <EntregaMarcas
+            titulo="Bonos de la cita"
+            ids={["bono_rodamiento", "bono_app", "bono_distintivos", "bono_equipo", "bono_espia"]}
+            entrega={entrega}
+            disabled={ocupado}
+            onToggle={tocarEntrega}
+          />
           <Marcas items={MARCAS_SERVICIO} activas={marcas} disabled={ocupado} onToggle={tocar} />
-          <input value={bonos} onChange={(e) => setBonos(e.target.value)} placeholder="Consecutivos de los bonos entregados" className="h-11 rounded-2xl border border-line bg-card px-3" />
-          <button type="button" disabled={ocupado} onClick={() => void correr(async () => { await marcarServicio({ data: { id: caso.id, bonos, beneficios, nota: notaServicio } }); onCaso({ bonos }); })} className="h-10 w-fit rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">
-            Guardar bonos
-          </button>
+          <ConsecutivosBonos
+            valor={bonos}
+            onChange={setBonos}
+            disabled={ocupado}
+            onGuardar={() => void correr(async () => { await marcarServicio({ data: { id: caso.id, bonos, beneficios, nota: notaServicio } }); onCaso({ bonos }); })}
+          />
         </div>
       ) : null}
 
@@ -839,6 +917,92 @@ function Cola({
         {filas.length === 0 ? <li className="text-sm text-ink-soft">Nadie en esta mano.</li> : null}
       </ul>
     </section>
+  );
+}
+
+function ConsecutivosBonos({
+  valor,
+  onChange,
+  disabled,
+  onGuardar,
+}: {
+  valor: string;
+  onChange: (valor: string) => void;
+  disabled: boolean;
+  onGuardar: () => void;
+}) {
+  const ids = ["bono_rodamiento", "bono_app", "bono_distintivos", "bono_equipo", "bono_espia"];
+  const mapa: Record<string, string> = {};
+  let suelto = "";
+  if (valor.includes("=")) {
+    for (const parte of valor.split("|")) {
+      const corte = parte.indexOf("=");
+      if (corte > 0) mapa[parte.slice(0, corte)] = parte.slice(corte + 1);
+    }
+  } else {
+    suelto = valor;
+  }
+  function poner(id: string, texto: string) {
+    const next = { ...mapa, [id]: texto };
+    onChange(ids.map((item) => `${item}=${next[item] ?? ""}`).join("|"));
+  }
+  return (
+    <div className="grid gap-2">
+      <p className="text-sm font-semibold">Consecutivo de cada bono</p>
+      {suelto ? <p className="text-sm text-ink-soft">Antes estaba anotado así: {suelto}</p> : null}
+      {ids.map((id) => (
+        <label key={id} className="text-sm">
+          {ENTREGA.find((item) => item.id === id)?.label ?? id}
+          <input
+            value={mapa[id] ?? ""}
+            disabled={disabled}
+            onChange={(e) => poner(id, e.target.value.slice(0, 40))}
+            placeholder="Número"
+            className="mt-1 h-11 w-full rounded-2xl border border-line bg-card px-3"
+          />
+        </label>
+      ))}
+      <button type="button" disabled={disabled} onClick={onGuardar} className="h-10 w-fit rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">
+        Guardar consecutivos
+      </button>
+    </div>
+  );
+}
+
+function EntregaMarcas({
+  titulo,
+  ids,
+  entrega,
+  disabled,
+  onToggle,
+}: {
+  titulo: string;
+  ids: string[];
+  entrega: string;
+  disabled: boolean;
+  onToggle: (id: string, on: boolean) => void;
+}) {
+  const activas = new Set(entregaIds(entrega));
+  const items = ENTREGA.filter((item) => ids.includes(item.id));
+  return (
+    <div className="grid gap-2">
+      <p className="text-sm font-semibold">{titulo}</p>
+      {items.map((item) => {
+        const on = activas.has(item.id);
+        return (
+          <button
+            key={item.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onToggle(item.id, !on)}
+            className={"flex min-h-11 items-center gap-3 rounded-2xl border px-3 text-left text-sm disabled:opacity-60 " + (on ? "border-navy bg-navy text-paper" : "border-line bg-card")}
+          >
+            <span className={"grid h-6 w-8 place-items-center rounded-md text-xs font-bold " + (on ? "bg-lime text-navy" : "bg-paper text-ink-soft")}>{on ? "Sí" : "No"}</span>
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { cambiosDe, siNo, textoPlano } from "@/lib/auditoria";
-import { casosDeArea, entregaDe, faseDe, hoyBogota, STEPS, toCaso, type Caso, type CasoDraft, type CasoRow, type StepKey } from "@/lib/casos";
+import { casosDeArea, entregaDe, entregaLista, faseDe, hoyBogota, otrosPropietarios, STEPS, toCaso, type Caso, type CasoDraft, type CasoRow, type StepKey } from "@/lib/casos";
 import { configura, esBandeja, llevaProcesos, veElEquipo, type Role } from "@/lib/team.public";
 import { unificarEmpresa } from "@/lib/empresas";
 
@@ -20,7 +20,8 @@ export const CASO_COLS = `
   c.motivo_cierre, c.fecha_cierre, c.updated_at,
   c.mano, c.via_estado, c.via_enlace, c.via_atencion, c.via_nota, c.via_pide_carta, c.via_pide_contrato,
   c.op_polizas, c.op_impreso, c.op_pedido, c.op_tarjeta, c.docs_ocultos,
-  c.servicio_nota, c.bonos, c.beneficios, c.area_marcas, c.mano_asignado, c.devolucion
+  c.servicio_nota, c.bonos, c.beneficios, c.area_marcas, c.mano_asignado, c.devolucion,
+  c.cita_fecha, c.cita_hora, c.entrega, c.copropietarios
 `;
 
 export const prepareTeam = createServerFn({ method: "POST" }).handler(async () => {
@@ -171,17 +172,18 @@ export const createCaso = createServerFn({ method: "POST" })
     const firma = /^\d{4}-\d{2}-\d{2}$/.test(data.fechaFirma ?? "") ? data.fechaFirma! : "";
     const hoy = firma || hoyBogota();
     const pdf = data.contratoPdf && data.contratoPdf.length > 80 ? data.contratoPdf : "";
+    const extras = JSON.stringify(otrosPropietarios(data.copropietarios));
     const sql = await getSql();
     const rows = await sql<{ id: number }>`
       insert into casos (
         owner_id, placa, cc, nombre, telefono, empresa, origen, fecha_inicio, dijo_si, firma_contrato,
-        direccion, correo, marca, linea, modelo, fecha_firma, contrato_nombre, contrato_pdf
+        direccion, correo, marca, linea, modelo, fecha_firma, contrato_nombre, contrato_pdf, copropietarios
       )
       values (
         ${ownerId}, ${placa}, ${cc}, ${nombre}, ${telefono}, ${empresa}, ${dato(data.origen, 80)}, ${hoy}, ${Boolean(pdf)}, ${Boolean(data.firmaContrato)},
         ${dato(data.direccion, 120)}, ${dato(data.correo, 80)}, ${dato(data.marca, 40)},
         ${dato(data.linea, 40)}, ${dato(data.modelo, 8)}, ${firma},
-        ${pdf ? dato(data.contratoNombre, 120) : ""}, ${pdf}
+        ${pdf ? dato(data.contratoNombre, 120) : ""}, ${pdf}, ${extras}
       )
       returning id
     `;
@@ -222,6 +224,10 @@ export type CasoPatch = {
   contratoNombre?: string;
   contratoPdf?: string;
   ownerSlug?: string;
+  citaFecha?: string;
+  citaHora?: string;
+  entrega?: string;
+  copropietarios?: string;
 } & Record<StepKey, boolean>;
 
 export const updateCaso = createServerFn({ method: "POST" })
@@ -293,6 +299,10 @@ export const updateCaso = createServerFn({ method: "POST" })
       motivo,
       fechaCierre,
       /^\d{4}-\d{2}-\d{2}$/.test(data.fechaCompra ?? "") ? data.fechaCompra : "",
+      /^\d{4}-\d{2}-\d{2}$/.test(data.citaFecha ?? "") ? data.citaFecha : "",
+      /^\d{2}:\d{2}$/.test(data.citaHora ?? "") ? data.citaHora : "",
+      entregaLista(data.entrega),
+      JSON.stringify(otrosPropietarios(data.copropietarios)),
     ];
     let text = `update casos set
       placa = $1, cc = $2, nombre = $3, telefono = $4, empresa = $5,
@@ -306,6 +316,7 @@ export const updateCaso = createServerFn({ method: "POST" })
       fecha_poliza = $32, origen = $33, motivo_cierre = $34, fecha_cierre = $35, fecha_compra = $36,
       poliza_fase = case when $18 then poliza_fase else '' end,
       poliza_entrega = case when $18 then poliza_entrega else '' end,
+      cita_fecha = $37, cita_hora = $38, entrega = $39, copropietarios = $40,
       updated_at = now()`;
     if (data.contratoPdf && data.contratoPdf.length > 80) {
       params.push(dato(data.contratoNombre, 120), data.contratoPdf);
@@ -324,6 +335,29 @@ export const updateCaso = createServerFn({ method: "POST" })
     text += " returning id";
     const updated = await sql.query<{ id: number }>(text, params);
     if (!updated.length) throw new Error("No encontré ese proceso");
+    const citaFecha = /^\d{4}-\d{2}-\d{2}$/.test(data.citaFecha ?? "") ? String(data.citaFecha) : "";
+    const citaHora = /^\d{2}:\d{2}$/.test(data.citaHora ?? "") ? String(data.citaHora) : "";
+    if (citaFecha) {
+      const dueno = String(previa?.owner_id ?? context.userId);
+      const ya = await sql.query<{ id: number }>(
+        `select id from agenda where caso_id = $1 and titulo = 'Cita de entrega' order by id desc limit 1`,
+        [data.id],
+      );
+      if (ya[0]) {
+        await sql.query(`update agenda set fecha = $1, hora = $2, owner_id = $3, nota = $4 where id = $5`, [
+          citaFecha,
+          citaHora,
+          dueno,
+          `Entrega de ${placa}`,
+          ya[0].id,
+        ]);
+      } else {
+        await sql.query(
+          `insert into agenda (owner_id, caso_id, tipo, titulo, fecha, hora, nota) values ($1, $2, 'visita', 'Cita de entrega', $3, $4, $5)`,
+          [dueno, data.id, citaFecha, citaHora, `Entrega de ${placa}`],
+        );
+      }
+    }
     if (previa) {
       const pares = [
         { label: "Placa", antes: textoPlano(previa.placa), despues: placa },
@@ -508,6 +542,96 @@ export const exportarExcel = createServerFn({ method: "GET" })
     );
     const { armarExcel } = await import("./excel.server");
     return armarExcel(rows.map(toCaso));
+  });
+
+export const exportarTodo = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { profileFor } = await import("./team.server");
+    const profile = await profileFor(context.userId);
+    if (!profile || !veElEquipo(profile.role)) throw new Error("Solo coordinación descarga todo");
+    const { anotar } = await import("./auditoria.server");
+    await anotar(profile, { accion: "exporto", entidad: "proceso", detalle: "Descargó el respaldo completo", etiqueta: "Respaldo" });
+    const sql = await getSql();
+    async function leer(nombre: string, text: string) {
+      try {
+        const filas = await sql.query<Record<string, unknown>>(text);
+        return { nombre, filas };
+      } catch {
+        return { nombre, filas: [] as Record<string, unknown>[] };
+      }
+    }
+    const hojas = [
+      await leer(
+        "Procesos",
+        `select c.id, c.owner_id, c.placa, c.cc, c.nombre, c.telefono, c.empresa, c.fecha_inicio,
+                c.dijo_si, c.cedula, c.tarjeta_propiedad, c.tarjeta_operacion, c.soat, c.tecnomecanica,
+                c.formulario, c.documentos, c.firma_carta, c.firma_contrato, c.plata_poliza, c.via_seguros,
+                c.polizas_subidas, c.operativa, c.estado_tarjeta, c.tarjeta_entregada, c.completado,
+                c.observacion, c.proxima, c.fecha_proxima, c.created_at, c.direccion, c.correo, c.marca,
+                c.linea, c.modelo, c.fecha_firma, c.contrato_nombre,
+                case when coalesce(c.contrato_pdf, '') <> '' then 'Sí' else 'No' end as tiene_contrato_pdf,
+                c.fecha_poliza, c.origen, c.updated_at, c.motivo_cierre, c.fecha_cierre, c.fecha_compra,
+                c.poliza_fase, c.poliza_entrega, c.docuseal_id, c.docuseal_estado, c.auditoria_nombre,
+                case when coalesce(c.auditoria_pdf, '') <> '' then 'Sí' else 'No' end as tiene_auditoria_pdf,
+                c.mano, c.via_estado, c.via_enlace, c.via_nota, c.via_pide_carta, c.via_pide_contrato,
+                c.op_polizas, c.op_impreso, c.op_pedido, c.op_tarjeta, c.docs_ocultos, c.servicio_nota,
+                c.bonos, c.beneficios, c.mano_asignado, c.devolucion, c.area_marcas, c.via_atencion,
+                c.copropietarios, p.name as asesor, p.slug as usuario
+         from casos c left join profiles p on p.user_id = c.owner_id
+         order by c.id`,
+      ),
+      await leer(
+        "Personas",
+        `select p.user_id, p.slug, p.name, p.role, k.clave
+         from profiles p left join claves_equipo k on k.user_id = p.user_id
+         order by p.name`,
+      ),
+      await leer("Bitacoras", `select b.*, p.name as asesor from bitacoras b left join profiles p on p.user_id = b.owner_id order by b.fecha, p.name`),
+      await leer(
+        "Control",
+        `select m.*, p.name as asesor, c.placa
+         from control_marcas m
+         left join profiles p on p.user_id = m.owner_id
+         left join casos c on c.id = m.caso_id
+         order by m.fecha, m.hora`,
+      ),
+      await leer("Horarios", `select e.*, p.name as asesor from equipo_extra e left join profiles p on p.user_id = e.owner_id`),
+      await leer("Dias meta", `select d.*, p.name as asesor from dias_meta d left join profiles p on p.user_id = d.owner_id order by d.fecha`),
+      await leer("Metas", `select m.*, p.name as asesor from metas_mes m left join profiles p on p.user_id = m.owner_id order by m.mes`),
+      await leer(
+        "Agenda",
+        `select a.*, p.name as asesor, c.placa from agenda a
+         left join profiles p on p.user_id = a.owner_id
+         left join casos c on c.id = a.caso_id
+         order by a.fecha, a.hora`,
+      ),
+      await leer(
+        "Chat",
+        `select m.id, m.caso_id, c.placa, p.name as autor, m.body, m.created_at
+         from mensajes m
+         left join casos c on c.id = m.caso_id
+         left join profiles p on p.user_id = m.author_id
+         order by m.id`,
+      ),
+      await leer("Auditoria", `select * from auditoria order by id`),
+      await leer(
+        "Documentos",
+        `select d.id, d.caso_id, c.placa, d.tipo, d.nombre, d.archivo, d.subido_por, d.created_at
+         from documentos d left join casos c on c.id = d.caso_id
+         order by d.id`,
+      ),
+      await leer("Sobres", `select s.*, c.placa from sobres s left join casos c on c.id = s.caso_id order by s.id`),
+      await leer(
+        "Firmantes",
+        `select f.id, f.sobre_id, f.orden, f.nombre, f.cc, f.correo, f.firmado_at,
+                case when coalesce(f.firma, '') <> '' then 'Sí' else 'No' end as firmo
+         from firmantes f order by f.sobre_id, f.orden`,
+      ),
+      await leer("Piloto", `select * from piloto`),
+    ];
+    const { armarRespaldo } = await import("./excel.server");
+    return armarRespaldo(hojas);
   });
 
 export const listMetas = createServerFn({ method: "GET" })

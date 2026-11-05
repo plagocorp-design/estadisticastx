@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Bell, BookOpen, CalendarDays, Clock, Download, ExternalLink, FileSpreadsheet, FileText, Flag, KeyRound, LayoutList, LogOut, MessageCircle, Phone, Plus, ScrollText, Search, Users, X } from "lucide-react";
+import { Bell, BookOpen, CalendarDays, Clock, Download, ExternalLink, FileSpreadsheet, FileText, Flag, Folder, KeyRound, LayoutList, LogOut, MessageCircle, Phone, Plus, ScrollText, Search, Users, X } from "lucide-react";
 import { signOut } from "@/lib/auth/client";
 import { listAgenda } from "@/lib/agenda.functions";
 import { type AgendaItem } from "@/lib/agenda";
@@ -14,7 +14,8 @@ import { cuando } from "@/lib/auditoria";
 import { certificadoProceso } from "@/lib/certificado.functions";
 import { EnviarFirma } from "@/components/enviar-firma";
 import { sincronizarDocuseal, verAuditoriaFirma } from "@/lib/firma.functions";
-import { leerDocumento, subirDocumento } from "@/lib/piloto.functions";
+import { leerDocumento, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
+import { enviarEnTrozos, prepararArchivo } from "@/lib/archivo";
 import type { CampoLeido } from "@/lib/ocr";
 import { listEquipo } from "@/lib/control.functions";
 import type { PersonaEquipo } from "@/lib/control";
@@ -27,6 +28,7 @@ import { marcarChatsLeidos, resumenChat, type ChatResumen } from "@/lib/chat.fun
 import {
   createCaso,
   exportarExcel,
+  exportarTodo,
   getMe,
   leerContrato,
   listCasos,
@@ -47,6 +49,8 @@ import {
   requisitosVia,
   siguientePaso,
   STEPS,
+  ENTREGA,
+  entregaIds,
   ORIGENES,
   tableroDe,
   enCurso,
@@ -127,6 +131,8 @@ export function Board() {
   const [open, setOpen] = useState<Caso | "new" | null>(null);
   const [error, setError] = useState("");
   const [exportando, setExportando] = useState(false);
+  const [archivos, setArchivos] = useState(false);
+  const [mas, setMas] = useState(false);
   const [vista, setVista] = useState<"procesos" | "agenda" | "meta" | "bitacora" | "control" | "equipo" | "auditoria">("procesos");
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [chats, setChats] = useState<Record<number, ChatResumen>>({});
@@ -288,11 +294,11 @@ export function Board() {
     }
   }
 
-  async function bajar() {
+  async function bajarArchivo(traer: () => Promise<{ base64: string; filename: string }>) {
     setExportando(true);
     setError("");
     try {
-      const file = await exportarExcel();
+      const file = await traer();
       const bin = atob(file.base64);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -312,6 +318,14 @@ export function Board() {
     } finally {
       setExportando(false);
     }
+  }
+
+  function bajar() {
+    return bajarArchivo(exportarExcel);
+  }
+
+  function bajarTodo() {
+    return bajarArchivo(exportarTodo);
   }
 
   function elegirModo(next: "mio" | "equipo") {
@@ -417,51 +431,84 @@ export function Board() {
           })}
         </nav>
         <div className="mt-auto grid gap-1">
-          {delEquipo ? (
+          {delEquipo || soyDavid ? (
+            <button
+              type="button"
+              onClick={() => setArchivos((v) => !v)}
+              className={"flex h-11 items-center gap-2 rounded-xl px-3 text-sm " + (archivos ? "bg-lime text-navy" : "text-paper")}
+            >
+              <Folder className="size-4" />
+              Archivos
+            </button>
+          ) : null}
+          {archivos && delEquipo ? (
+            <>
             <button
               type="button"
               onClick={() => void bajar()}
               disabled={exportando}
-              className="flex h-11 items-center gap-2 rounded-xl px-3 text-sm text-paper disabled:opacity-60"
+              className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper disabled:opacity-60"
             >
               <Download className="size-4" />
               {exportando ? "Armando…" : "Excel"}
             </button>
+            <button
+              type="button"
+              onClick={() => void bajarTodo()}
+              disabled={exportando}
+              className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper disabled:opacity-60"
+            >
+              <Download className="size-4" />
+              {exportando ? "Armando…" : "Todo"}
+            </button>
+            </>
           ) : null}
-          {soyDavid ? (
+          {archivos && soyDavid ? (
             <button
               type="button"
               onClick={() => setSheetsOpen(true)}
-              className="flex h-11 items-center gap-2 rounded-xl px-3 text-sm text-paper"
+              className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper"
             >
               <FileSpreadsheet className="size-4" />
               Configurar Sheets
             </button>
           ) : null}
-          {delEquipo ? (
+          {delEquipo || !bandeja ? (
+            <button
+              type="button"
+              onClick={() => setMas((v) => !v)}
+              className={"flex h-11 items-center gap-2 rounded-xl px-3 text-sm " + (mas ? "bg-lime text-navy" : "text-paper")}
+            >
+              <Folder className="size-4" />
+              Más
+            </button>
+          ) : null}
+          {mas && delEquipo ? (
             <a
               href={docUrl || DOCUMENTO}
               target="_blank"
               rel="noreferrer"
-              className="flex h-11 items-center gap-2 rounded-xl px-3 text-sm text-paper"
+              className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper"
             >
               <ExternalLink className="size-4" />
               Documento
             </a>
           ) : null}
-          {bandeja ? null : (
-          <a href="/piloto" className="flex h-11 items-center gap-2 rounded-xl px-3 text-sm text-paper">
+          {mas && !bandeja ? (
+          <a href="/piloto" className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper">
             Áreas
           </a>
-          )}
+          ) : null}
+          {mas ? (
           <button
             type="button"
-            className="flex h-11 items-center gap-2 rounded-xl px-3 text-sm text-paper"
+            className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper"
             onClick={() => setClaveOpen(true)}
           >
             <KeyRound className="size-4" />
             Mi clave
           </button>
+          ) : null}
           <button
             type="button"
             className="flex h-11 items-center gap-2 rounded-xl px-3 text-sm text-paper"
@@ -531,7 +578,16 @@ export function Board() {
         ) : null}
         {delEquipo || soyDavid ? (
           <div className="mt-3 flex flex-wrap gap-2 lg:hidden">
-            {delEquipo ? (
+            <button
+              type="button"
+              onClick={() => setArchivos((v) => !v)}
+              className="inline-flex h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm"
+            >
+              <Folder className="size-4" />
+              Archivos
+            </button>
+            {archivos && delEquipo ? (
+              <>
               <button
                 type="button"
                 onClick={() => void bajar()}
@@ -541,8 +597,18 @@ export function Board() {
                 <Download className="size-4" />
                 {exportando ? "Armando…" : "Excel"}
               </button>
+              <button
+                type="button"
+                onClick={() => void bajarTodo()}
+                disabled={exportando}
+                className="inline-flex h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm disabled:opacity-60"
+              >
+                <Download className="size-4" />
+                {exportando ? "Armando…" : "Todo"}
+              </button>
+              </>
             ) : null}
-            {soyDavid ? (
+            {archivos && soyDavid ? (
               <button
                 type="button"
                 onClick={() => setSheetsOpen(true)}
@@ -860,6 +926,9 @@ export function Board() {
                         </p>
                       ) : null}
                       <p className={"mt-2 text-sm " + (c.motivoCierre.trim() && !c.completado ? "line-clamp-2" : "")}>{siguientePaso(c)}</p>
+                      {c.citaFecha ? (
+                        <p className="mt-1 text-sm font-medium">Cita {fechaCorta(c.citaFecha)}{c.citaHora ? ` · ${c.citaHora}` : ""}</p>
+                      ) : null}
                       {chats[c.id] ? (
                         <p className="mt-1 line-clamp-1 text-sm text-ink-soft">
                           {chats[c.id].ultimoDe.split(" ")[0]}: {chats[c.id].ultimo}
@@ -1304,6 +1373,7 @@ function Panel({
 }) {
   const [draft, setDraft] = useState<CasoDraft>(borradorVacio);
   const [form, setForm] = useState<Caso | null>(caso);
+  const [pestana, setPestana] = useState<"inicio" | "documentos" | "firma" | "poliza" | "tarjeta" | "cita" | "chat">("inicio");
   const [pdfNuevo, setPdfNuevo] = useState("");
   const [nombrePdf, setNombrePdf] = useState("");
   const [leyendo, setLeyendo] = useState(false);
@@ -1331,7 +1401,16 @@ function Panel({
   ownerRef.current = ownerSlug;
   pdfRef.current = { pdf: pdfNuevo, nombre: nombrePdf };
   const vivo = form ? conAvance(form) : null;
-  const grupos = useMemo(() => GRUPOS.map((g) => ({ g, steps: STEPS.filter((s) => s.group === g) })), []);
+  const grupos = useMemo(
+    () =>
+      GRUPOS.map((g) => ({
+        g,
+        steps: STEPS.filter(
+          (s) => s.group === g && !["soat", "tecnomecanica", "formulario", "documentos", "completado"].includes(s.key),
+        ),
+      })),
+    [],
+  );
 
   useEffect(() => {
     if (!caso?.docusealId || caso.docusealEstado === "completed") return;
@@ -1353,7 +1432,7 @@ function Panel({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") void cerrar();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1399,6 +1478,10 @@ function Panel({
       modelo: actual.modelo,
       fechaFirma: actual.fechaFirma,
       fechaCompra: actual.fechaCompra,
+      citaFecha: actual.citaFecha,
+      citaHora: actual.citaHora,
+      entrega: actual.entrega,
+      copropietarios: actual.copropietarios,
       ownerSlug: ownerRef.current,
       pdf: pdf.pdf ? `${pdf.nombre}:${pdf.pdf.length}:${pdf.pdf.slice(0, 24)}` : "",
     });
@@ -1452,6 +1535,10 @@ function Panel({
       modelo: actual.modelo,
       fechaFirma: actual.fechaFirma,
       fechaCompra: actual.fechaCompra,
+      citaFecha: actual.citaFecha,
+      citaHora: actual.citaHora,
+      entrega: actual.entrega,
+      copropietarios: actual.copropietarios,
       ...(pdf.pdf ? { contratoPdf: pdf.pdf, contratoNombre: pdf.nombre } : {}),
       ...(delEquipo ? { ownerSlug: ownerRef.current } : {}),
     };
@@ -1488,6 +1575,11 @@ function Panel({
     }
   }
 
+  async function cerrar() {
+    await persistir();
+    onClose();
+  }
+
   useEffect(() => {
     montadoRef.current = true;
     return () => {
@@ -1520,6 +1612,9 @@ function Panel({
           data: { casoId: id, tipo: foto.tipo, nombre: foto.nombre, archivo: foto.archivo, lectura: foto.lectura },
         });
       }
+      if (draft.contratoPdf && draft.contratoPdf.length > 80) {
+        await guardarComoDocumento(id, "contrato", draft.contratoNombre || "contrato.pdf", draft.contratoPdf, "");
+      }
       await onCreated(id);
     } catch (err) {
       onError(fallo(err));
@@ -1539,7 +1634,8 @@ function Panel({
     setLeyendoFoto(tipo);
     setAviso("");
     try {
-      const archivo = await aBase64(file);
+      const listo = await prepararArchivo(file);
+      const archivo = listo.archivo;
       const actual = {
         placa: draft.placa,
         cc: draft.cc,
@@ -1552,7 +1648,7 @@ function Panel({
         modelo: draft.modelo ?? "",
         empresa: draft.empresa,
       };
-      const leida = await leerDocumento({ data: { tipo, nombre: file.name || `${tipo}.jpg`, archivo, actual } });
+      const leida = await leerDocumento({ data: { tipo, nombre: listo.nombre, archivo, actual } });
       const llenos: Partial<CasoDraft> = {};
       const distintos: CampoLeido[] = [];
       for (const campo of leida.campos) {
@@ -1564,7 +1660,7 @@ function Panel({
       setChoques((prev) => [...prev.filter((item) => !leida.campos.some((campo) => campo.key === item.key)), ...distintos]);
       setFotosApertura((prev) => [
         ...prev.filter((item) => item.tipo !== tipo),
-        { tipo, nombre: file.name || `${tipo}.jpg`, archivo, lectura: JSON.stringify(leida) },
+        { tipo, nombre: listo.nombre, archivo, lectura: JSON.stringify(leida) },
       ]);
       const etiquetas = Object.keys(llenos).map((key) => leida.campos.find((campo) => campo.key === key)?.label ?? key);
       setAviso(
@@ -1596,6 +1692,13 @@ function Panel({
     setAviso("");
   }
 
+  async function guardarComoDocumento(casoId: number, tipo: string, nombre: string, archivo: string, lectura: string) {
+    const cargaId = crypto.randomUUID();
+    await enviarEnTrozos(archivo, async (orden, datos, fin) => {
+      await recibirTrozo({ data: { cargaId, orden, datos, fin, casoId, tipo, nombre, lectura } });
+    });
+  }
+
   async function tomarContrato(file: File) {
     if (file.type && file.type !== "application/pdf") {
       onError("Sube el contrato en PDF");
@@ -1609,7 +1712,14 @@ function Panel({
     setAviso("");
     try {
       const pdf = await aBase64(file);
+      if (pdf.length > 3_000_000) {
+        if (!caso) throw new Error("Ese contrato es muy pesado para leerlo. Súbelo en Documentos como contrato.");
+        await guardarComoDocumento(caso.id, "contrato", file.name, pdf, "");
+        setAviso("El contrato pesa mucho para leerlo aquí. Quedó guardado en Documentos.");
+        return;
+      }
       const leido = await leerContrato({ data: { pdf } });
+      if (caso) await guardarComoDocumento(caso.id, "contrato", file.name, pdf, "");
       if (!caso) {
         setDraft((d) => ({
           ...d,
@@ -1654,8 +1764,8 @@ function Panel({
       const carro = [leido.marca, leido.linea, leido.modelo].filter(Boolean).join(" ");
       setAviso(
         leido.firmado
-          ? `Contrato leído: ${leido.placa} · ${leido.nombre}${carro ? ` · ${carro}` : ""}. Revisa, se guarda solo.`
-          : "Leí los datos. No vi la firma del propietario: confírmala. Se guarda solo.",
+          ? `Contrato leído: ${leido.placa} · ${leido.nombre}${carro ? ` · ${carro}` : ""}. Quedó también en Documentos.`
+          : "Leí los datos. No vi la firma del propietario: confírmala. El archivo quedó en Documentos.",
       );
     } catch (err) {
       onError(fallo(err));
@@ -1741,7 +1851,7 @@ function Panel({
   const tel = form ? celular(form.telefono) : "";
 
   return (
-    <div className="fixed inset-0 z-30 flex justify-end bg-ink/40" onClick={onClose}>
+    <div className="fixed inset-0 z-30 flex justify-end bg-ink/40" onClick={() => void cerrar()}>
       <div className="rise flex h-dvh w-full flex-col bg-card lg:max-w-3xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div>
@@ -1766,7 +1876,7 @@ function Panel({
                 {certificando ? "Armando…" : "Certificado"}
               </button>
             ) : null}
-            <button type="button" onClick={onClose} aria-label="Cerrar" className="grid size-11 place-items-center rounded-xl">
+            <button type="button" onClick={() => void cerrar()} aria-label="Cerrar" className="grid size-11 place-items-center rounded-xl">
               <X />
             </button>
           </div>
@@ -1808,6 +1918,7 @@ function Panel({
               <Field label="CC del propietario" value={draft.cc} onChange={(v) => setDraft({ ...draft, cc: v })} />
               <Field label="Nombre del propietario" value={draft.nombre} onChange={(v) => setDraft({ ...draft, nombre: v })} />
               <Field label="Celular" value={draft.telefono} onChange={(v) => setDraft({ ...draft, telefono: v })} />
+              <OtrosPropietarios valor={draft.copropietarios ?? ""} onChange={(copropietarios) => setDraft((actual) => ({ ...actual, copropietarios }))} />
               <EmpresaSelect value={draft.empresa} onChange={(v) => setDraft({ ...draft, empresa: v })} />
               <Origen key="nuevo" value={draft.origen ?? ""} onChange={(v) => setDraft({ ...draft, origen: v })} />
               <DatosContrato
@@ -1842,16 +1953,24 @@ function Panel({
               />
             </div>
           ) : form && vivo ? (
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div className="lg:col-span-2">
+            <ProcesoConPestanas
+              form={form}
+              pestana={pestana}
+              setPestana={setPestana}
+              siguiente={siguientePaso(form)}
+            >
+            <div className="grid gap-4">
+              {pestana === "chat" ? (
                 <ChatCaso casoId={form.id} duenoId={form.ownerId} yo={yo} delEquipo={delEquipo} onCambio={onChat} />
-              </div>
+              ) : null}
+              {pestana === "documentos" ? (
               <BloquePiloto
                 caso={form}
                 rol={rol}
                 miSlug={miSlug}
                 activo
                 soloDocs
+                soloTipos={["unificado", "cedula", "tarjeta_propiedad", "tarjeta_operacion", "contrato"]}
                 onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))}
                 onListo={() => {
                   onChat();
@@ -1859,17 +1978,24 @@ function Panel({
                 }}
                 onError={onError}
               />
-              <div className="order-2 grid content-start gap-3 lg:order-1">
-                {delEquipo ? <AsesorSelect value={ownerSlug} onChange={setOwnerSlug} /> : null}
-                {canEdit ? (
+              ) : null}
+              {pestana === "inicio" || pestana === "firma" ? (
+              <div className="grid content-start gap-3">
+                {pestana === "inicio" && delEquipo ? <AsesorSelect value={ownerSlug} onChange={setOwnerSlug} /> : null}
+                {canEdit && pestana === "inicio" ? (
                   <>
-                    <SubirContrato busy={leyendo || busy} onFile={tomarContrato} />
                     <Field label="Placa" value={form.placa} onChange={(v) => setForm({ ...form, placa: v.toUpperCase() })} />
                     <Field label="CC del propietario" value={form.cc} onChange={(v) => setForm({ ...form, cc: v })} />
                     <Field label="Nombre" value={form.nombre} onChange={(v) => setForm({ ...form, nombre: v })} />
                     <Field label="Celular" value={form.telefono} onChange={(v) => setForm({ ...form, telefono: v })} />
+                    <OtrosPropietarios valor={form.copropietarios} onChange={(copropietarios) => setForm((actual) => (actual ? { ...actual, copropietarios } : actual))} />
                     <EmpresaSelect value={form.empresa} onChange={(v) => setForm({ ...form, empresa: v })} />
                     <Origen key={form.id} value={form.origen} onChange={(v) => setForm({ ...form, origen: v })} />
+                  </>
+                ) : null}
+                {canEdit && pestana === "firma" ? (
+                  <>
+                    <SubirContrato busy={leyendo || busy} onFile={tomarContrato} />
                     <DatosContrato
                       direccion={form.direccion}
                       correo={form.correo}
@@ -1893,7 +2019,6 @@ function Panel({
                       empresa={form.empresa}
                       copropietarios={form.copropietarios}
                       onEnviado={(id) => setForm((actual) => (actual ? { ...actual, docusealId: id, docusealEstado: "pendiente" } : actual))}
-                      onOtros={(valor) => setForm((actual) => (actual ? { ...actual, copropietarios: valor } : actual))}
                     />
                     {form.docusealId ? (
                       <div className="grid gap-2 rounded-2xl border border-line p-3 text-sm">
@@ -1920,7 +2045,8 @@ function Panel({
                       </button>
                     ) : null}
                   </>
-                ) : (
+                ) : null}
+                {!canEdit && pestana === "inicio" ? (
                   <p className="text-sm">
                     <span className="font-semibold">{form.nombre}</span>
                     <span className="mt-1 block text-ink-soft">
@@ -1931,8 +2057,8 @@ function Panel({
                       {" · "}desde {fechaCorta(form.fechaInicio)} · {form.ownerName}
                     </span>
                   </p>
-                )}
-                {tel.length >= 12 ? (
+                ) : null}
+                {pestana === "inicio" && tel.length >= 12 ? (
                   <div className="flex gap-2">
                     <a href={`tel:+${tel}`} className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-line text-sm font-semibold">
                       <Phone className="size-4" /> Llamar
@@ -1947,41 +2073,8 @@ function Panel({
                     </a>
                   </div>
                 ) : null}
-                {listoParaVia(form) ? (
-                  <p className="rounded-2xl bg-lime px-3 py-3 text-sm font-medium text-ink">
-                    Listo para Vía Seguros: ya están los papeles, las dos firmas y la plata.
-                  </p>
-                ) : null}
-                {form.viaSeguros && !requisitosVia(form) ? (
-                  <p className="rounded-2xl bg-paper px-3 py-3 text-sm text-danger">
-                    A Vía Seguros se pasa con papeles, las dos firmas y la plata de la póliza. Revisa lo que falta.
-                  </p>
-                ) : null}
-                <p className="text-sm">
-                  <span className="font-semibold">Siguiente: </span>
-                  {siguientePaso(form)}
-                </p>
-                <div>
-                  <p className="text-sm font-medium">Estado de la tarjeta</p>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {TARJETAS.map((t) => {
-                      const on = form.estadoTarjeta === t;
-                      return (
-                        <button
-                          key={t}
-                          type="button"
-                          disabled={!canEdit}
-                          onClick={() => setForm({ ...form, estadoTarjeta: on ? "" : t })}
-                          className={
-                            "h-11 rounded-2xl border text-sm font-semibold " + (on ? "border-navy bg-navy text-paper" : "border-line")
-                          }
-                        >
-                          {t}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                {pestana === "inicio" ? (
+                  <>
                 <label className="text-sm font-medium">
                   Observación
                   <textarea
@@ -2036,9 +2129,64 @@ function Panel({
                   />
                   <span className="mt-1 block text-xs font-normal text-ink-soft">Esta fecha sale en la agenda de ese día.</span>
                 </label>
+                  </>
+                ) : null}
               </div>
-              <div className="order-1 grid content-start gap-4 lg:order-2">
-                {grupos.map(({ g, steps }) => {
+              ) : null}
+              {pestana === "poliza" && listoParaVia(form) ? (
+                <p className="rounded-2xl bg-lime px-3 py-3 text-sm font-medium text-ink">
+                  Listo para Vía Seguros: ya están los papeles, las dos firmas y la plata.
+                </p>
+              ) : null}
+              {pestana === "poliza" && form.viaSeguros && !requisitosVia(form) ? (
+                <p className="rounded-2xl bg-paper px-3 py-3 text-sm text-danger">
+                  A Vía Seguros se pasa con los tres documentos, las dos firmas y la plata de la póliza.
+                </p>
+              ) : null}
+              {pestana === "tarjeta" ? (
+                <div>
+                  <p className="text-sm font-medium">Estado de la tarjeta</p>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {TARJETAS.map((t) => {
+                      const on = form.estadoTarjeta === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          disabled={!canEdit}
+                          onClick={() => setForm({ ...form, estadoTarjeta: on ? "" : t })}
+                          className={
+                            "h-11 rounded-2xl border text-sm font-semibold " + (on ? "border-navy bg-navy text-paper" : "border-line")
+                          }
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              {pestana === "cita" ? (
+                <>
+                <CitaEntrega form={form} canEdit={canEdit} onChange={(patch) => setForm({ ...form, ...patch })} />
+                <BloquePiloto
+                  caso={form}
+                  rol={rol}
+                  miSlug={miSlug}
+                  activo
+                  soloDocs
+                  soloTipos={["autorizacion"]}
+                  onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))}
+                  onListo={() => {
+                    onChat();
+                    void onSaved();
+                  }}
+                  onError={onError}
+                />
+                </>
+              ) : null}
+              <div className="order-first grid content-start gap-4">
+                {grupos.filter(({ g }) => g === (pestana === "inicio" ? "Inicio" : pestana === "documentos" ? "Documentos" : pestana === "firma" ? "Firma" : pestana === "poliza" ? "Póliza" : pestana === "tarjeta" ? "Tarjeta" : "")).map(({ g, steps }) => {
                   const listos = steps.filter((s) => form[s.key]).length;
                   return (
                     <fieldset key={g}>
@@ -2119,6 +2267,7 @@ function Panel({
                 {!canEdit ? <p className="text-sm text-ink-soft">Este proceso no se puede editar desde aquí.</p> : null}
               </div>
             </div>
+            </ProcesoConPestanas>
           ) : null}
         </div>
 
@@ -2162,18 +2311,149 @@ function Panel({
                   Reintentar
                 </button>
               ) : (
-                <button type="button" onClick={onClose} className="h-12 rounded-2xl bg-navy px-5 font-semibold text-paper">
+                <button type="button" onClick={() => void cerrar()} className="h-12 rounded-2xl bg-navy px-5 font-semibold text-paper">
                   Cerrar
                 </button>
               )}
             </>
           ) : (
-            <button type="button" onClick={onClose} className="h-12 flex-1 rounded-2xl bg-navy font-semibold text-paper">
+            <button type="button" onClick={() => void cerrar()} className="h-12 flex-1 rounded-2xl bg-navy font-semibold text-paper">
               Cerrar
             </button>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ProcesoConPestanas({
+  form,
+  pestana,
+  setPestana,
+  siguiente,
+  children,
+}: {
+  form: Caso;
+  pestana: "inicio" | "documentos" | "firma" | "poliza" | "tarjeta" | "cita" | "chat";
+  setPestana: (id: "inicio" | "documentos" | "firma" | "poliza" | "tarjeta" | "cita" | "chat") => void;
+  siguiente: string;
+  children: ReactNode;
+}) {
+  const docs = form.cedula && form.tarjetaPropiedad && form.tarjetaOperacion;
+  const recibida =
+    form.areaMarcas.includes("tarjeta_recibida") || form.opTarjeta === "entregada" || form.tarjetaEntregada || form.estadoTarjeta === "Expedida";
+  const tabs = [
+    { id: "inicio" as const, label: "Inicio", abierta: true },
+    { id: "documentos" as const, label: "Documentos", abierta: form.dijoSi },
+    { id: "firma" as const, label: "Firma", abierta: docs },
+    { id: "poliza" as const, label: "Póliza", abierta: form.firmaContrato },
+    { id: "tarjeta" as const, label: "Tarjeta", abierta: form.polizasSubidas },
+    { id: "cita" as const, label: "Cita", abierta: recibida },
+    { id: "chat" as const, label: "Chat", abierta: true },
+  ];
+  return (
+    <div className="grid gap-4">
+      <div className="rounded-2xl border border-line bg-paper p-3 text-sm">
+        <p className="font-semibold">
+          {form.placa} · {form.nombre || "Sin propietario"}
+        </p>
+        <p className="mt-1 text-ink-soft">
+          {form.estado}. {siguiente}
+        </p>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            disabled={!tab.abierta}
+            onClick={() => setPestana(tab.id)}
+            className={
+              "h-10 shrink-0 rounded-2xl px-3 text-sm font-semibold disabled:opacity-40 " +
+              (pestana === tab.id ? "bg-navy text-paper" : "border border-line")
+            }
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function CitaEntrega({
+  form,
+  canEdit,
+  onChange,
+}: {
+  form: Caso;
+  canEdit: boolean;
+  onChange: (patch: Partial<Caso>) => void;
+}) {
+  const tiene = new Set(entregaIds(form.entrega));
+  const bonos = ["bono_rodamiento", "bono_app", "bono_distintivos", "bono_equipo", "bono_espia"];
+  const listo = tiene.has("distintivos") && tiene.has("pegada") && tiene.has("tarjeta_nueva") && bonos.every((id) => tiene.has(id));
+  function marcar(id: string) {
+    const next = new Set(tiene);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange({ entrega: [...next].join(",") });
+  }
+  return (
+    <div className="grid gap-3">
+      <p className="text-sm text-ink-soft">
+        Cita al señor cuando la tarjeta ya llegó. Ese día la jefe Asiyade entrega los distintivos, dejan el carro, pasan por operativa y salen por los bonos.
+      </p>
+      <label className="text-sm font-medium">
+        Día de la cita
+        <input
+          type="date"
+          disabled={!canEdit}
+          value={form.citaFecha}
+          onChange={(e) => onChange({ citaFecha: e.target.value })}
+          className="mt-1 h-11 w-full rounded-2xl border border-line px-3"
+        />
+      </label>
+      <label className="text-sm font-medium">
+        Hora
+        <input
+          type="time"
+          disabled={!canEdit}
+          value={form.citaHora}
+          onChange={(e) => onChange({ citaHora: e.target.value })}
+          className="mt-1 h-11 w-full rounded-2xl border border-line px-3"
+        />
+        <span className="mt-1 block text-xs font-normal text-ink-soft">Queda en la agenda como visita, Cita de entrega.</span>
+      </label>
+      <div className="grid gap-2">
+        {ENTREGA.map((item) => {
+          const on = tiene.has(item.id);
+          return (
+            <button
+              key={item.id}
+              type="button"
+              disabled={!canEdit}
+              onClick={() => marcar(item.id)}
+              className={"flex min-h-11 items-center gap-3 rounded-2xl border px-3 text-left text-sm " + (on ? "border-navy bg-navy text-paper" : "border-line")}
+            >
+              <span className={"grid h-6 w-8 place-items-center rounded-md text-xs font-bold " + (on ? "bg-lime text-navy" : "bg-paper text-ink-soft")}>
+                {on ? "Sí" : "No"}
+              </span>
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        disabled={!canEdit || (!listo && !form.completado)}
+        onClick={() => onChange({ completado: !form.completado, motivoCierre: form.completado ? form.motivoCierre : "" })}
+        className={"h-11 rounded-2xl text-sm font-semibold disabled:opacity-50 " + (form.completado ? "bg-navy text-paper" : "border border-line")}
+      >
+        {form.completado ? "Completado" : listo ? "Marcar completado" : "Faltan distintivos, tarjeta o bonos"}
+      </button>
     </div>
   );
 }
@@ -2431,6 +2711,47 @@ function AsesorSelect({ value, onChange }: { value: string; onChange: (slug: str
         ))}
       </select>
     </label>
+  );
+}
+
+function OtrosPropietarios({ valor, onChange }: { valor: string; onChange: (valor: string) => void }) {
+  const [otros, setOtros] = useState<{ nombre: string; cc: string; correo: string }[]>(() => {
+    try {
+      const data = JSON.parse(valor) as { nombre?: string; cc?: string; correo?: string }[];
+      if (!Array.isArray(data)) return [];
+      return data.map((parte) => ({ nombre: parte.nombre ?? "", cc: parte.cc ?? "", correo: parte.correo ?? "" }));
+    } catch {
+      return [];
+    }
+  });
+  function actualizar(next: { nombre: string; cc: string; correo: string }[]) {
+    setOtros(next);
+    const llenos = next.filter((parte) => parte.nombre.trim() || parte.cc.trim() || parte.correo.trim());
+    onChange(llenos.length ? JSON.stringify(llenos) : "");
+  }
+  return (
+    <div className="grid gap-2">
+      {otros.map((parte, indice) => (
+        <div key={indice} className="grid gap-2 rounded-2xl border border-line p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold">Propietario {indice + 2}</p>
+            <button type="button" className="text-sm font-semibold text-danger" onClick={() => actualizar(otros.filter((_, i) => i !== indice))}>
+              Quitar
+            </button>
+          </div>
+          <Field label="Nombre" value={parte.nombre} onChange={(nombre) => actualizar(otros.map((item, i) => (i === indice ? { ...item, nombre } : item)))} />
+          <Field label="Cédula" value={parte.cc} onChange={(cc) => actualizar(otros.map((item, i) => (i === indice ? { ...item, cc } : item)))} />
+          <Field label="Correo" optional value={parte.correo} onChange={(correo) => actualizar(otros.map((item, i) => (i === indice ? { ...item, correo } : item)))} />
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => actualizar([...otros, { nombre: "", cc: "", correo: "" }])}
+        className="h-11 rounded-2xl border border-line text-sm font-semibold"
+      >
+        Agregar otro propietario
+      </button>
+    </div>
   );
 }
 

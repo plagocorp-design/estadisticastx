@@ -466,3 +466,37 @@ export async function armarExcel(casos: Caso[]) {
     base64: Buffer.from(buffer).toString("base64"),
   };
 }
+
+function valorCelda(valor: unknown): string | number {
+  if (valor == null) return "";
+  if (typeof valor === "bigint") return Number(valor);
+  if (valor instanceof Date) return valor.toISOString();
+  if (typeof valor === "boolean") return valor ? "Sí" : "No";
+  if (typeof valor === "object") return JSON.stringify(valor);
+  return valor as string | number;
+}
+
+export async function armarRespaldo(hojas: { nombre: string; filas: Record<string, unknown>[] }[]) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Vincula Libre";
+  wb.created = new Date();
+  for (const hoja of hojas) {
+    const sheet = wb.addWorksheet(hoja.nombre.slice(0, 31));
+    const columnas = [...new Set(hoja.filas.flatMap((fila) => Object.keys(fila)))];
+    sheet.addRow(columnas.length ? columnas : ["sin registros"]);
+    pintarEncabezado(sheet, 1, 1, Math.max(columnas.length, 1));
+    for (const fila of hoja.filas) {
+      sheet.addRow(columnas.map((col) => valorCelda(fila[col])));
+    }
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(hoja.filas.length + 1, 1), column: Math.max(columnas.length, 1) } };
+    columnas.forEach((_, i) => {
+      sheet.getColumn(i + 1).width = 22;
+    });
+  }
+  const buffer = await wb.xlsx.writeBuffer();
+  return {
+    filename: `Respaldo_Vincula_Libre_${hoyBogota()}.xlsx`,
+    base64: Buffer.from(buffer).toString("base64"),
+  };
+}

@@ -8,6 +8,7 @@ export const DOCS_PILOTO = [
   { id: "formulario", label: "Formulario" },
   { id: "contrato", label: "Contrato" },
   { id: "carta", label: "Carta de desvinculación" },
+  { id: "autorizacion", label: "Carta de autorización del conductor" },
   { id: "comprobante", label: "Comprobante de pago" },
   { id: "poliza", label: "Póliza" },
 ] as const;

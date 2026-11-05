@@ -62,6 +62,9 @@ export type Caso = {
   manoAsignado: string;
   devolucion: string;
   copropietarios: string;
+  citaFecha: string;
+  citaHora: string;
+  entrega: string;
   contratoNombre: string;
   docusealId: string;
   docusealEstado: string;
@@ -96,7 +99,57 @@ export type CasoDraft = {
   contratoPdf?: string;
   firmaContrato?: boolean;
   ownerSlug?: string;
+  copropietarios?: string;
 };
+
+export function otrosPropietarios(value: unknown) {
+  try {
+    const data = JSON.parse(String(value ?? "")) as { nombre?: string; cc?: string; correo?: string }[];
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((parte) => parte && (String(parte.nombre ?? "").trim() || String(parte.cc ?? "").trim()))
+      .slice(0, 11)
+      .map((parte) => ({
+        nombre: parte.nombre!.trim().slice(0, 80),
+        cc: String(parte.cc ?? "").replace(/\D/g, "").slice(0, 20),
+        correo: String(parte.correo ?? "").trim().slice(0, 80),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+const NO_CUENTA = new Set<StepKey>(["soat", "tecnomecanica", "formulario", "documentos"]);
+
+export function pasosQueCuentan() {
+  return STEPS.filter((step) => !NO_CUENTA.has(step.key));
+}
+
+export const ENTREGA = [
+  { id: "distintivos", label: "Distintivos recibidos de la jefe Asiyade: dos puertas y uno atrás" },
+  { id: "pegada", label: "Carro en distintivos y planilla firmada" },
+  { id: "carta", label: "Carta de autorización, si no viene el propietario" },
+  { id: "tarjeta_nueva", label: "Tarjeta de operación nueva entregada" },
+  { id: "tarjeton", label: "Tarjetón, si es conductor propietario" },
+  { id: "bono_rodamiento", label: "Bono: año de rodamiento" },
+  { id: "bono_app", label: "Bono: app de Taxis Libres" },
+  { id: "bono_distintivos", label: "Bono de distintivos" },
+  { id: "bono_equipo", label: "Bono de $100.000 para el equipo" },
+  { id: "bono_espia", label: "Bono: dos meses de espía" },
+] as const;
+
+const ENTREGA_IDS = new Set<string>(ENTREGA.map((item) => item.id));
+
+export function entregaIds(value: unknown) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => ENTREGA_IDS.has(item));
+}
+
+export function entregaLista(value: unknown) {
+  return entregaIds(value).join(",");
+}
 
 const DB: Record<StepKey, string> = {
   dijoSi: "dijo_si",
@@ -147,7 +200,8 @@ export type CasoRow = {
 export function toCaso(row: CasoRow): Caso {
   const steps = {} as Record<StepKey, boolean>;
   for (const step of STEPS) steps[step.key] = Boolean(row[DB[step.key]]);
-  const done = STEPS.filter((s) => steps[s.key]).length;
+  const pasos = pasosQueCuentan();
+  const done = pasos.filter((step) => steps[step.key]).length;
   const tarjeta = (["Pendiente", "Radicada", "Expedida"].includes(row.estado_tarjeta)
     ? row.estado_tarjeta
     : "") as Caso["estadoTarjeta"];
@@ -191,6 +245,9 @@ export function toCaso(row: CasoRow): Caso {
     manoAsignado: String(row.mano_asignado ?? ""),
     devolucion: String(row.devolucion ?? ""),
     copropietarios: String(row.copropietarios ?? ""),
+    citaFecha: String(row.cita_fecha ?? ""),
+    citaHora: String(row.cita_hora ?? ""),
+    entrega: entregaLista(row.entrega),
     contratoNombre: row.contrato_nombre ?? "",
     docusealId: String(row.docuseal_id ?? ""),
     docusealEstado: String(row.docuseal_estado ?? ""),
@@ -202,7 +259,7 @@ export function toCaso(row: CasoRow): Caso {
     fechaProxima: row.fecha_proxima,
     motivoCierre,
     fechaCierre: String(row.fecha_cierre ?? ""),
-    avance: Math.round((done / STEPS.length) * 100),
+    avance: Math.round((done / pasos.length) * 100),
     estado: estadoDe({ ...steps, estadoTarjeta: tarjeta, motivoCierre, polizaFase: faseDe(row.poliza_fase), polizaEntrega: entregaDe(row.poliza_entrega) }),
     actualizadoEn: String(row.updated_at ?? ""),
     actualizadoPor: String(row.actualizado_por ?? ""),
@@ -233,20 +290,20 @@ export function estadoDe(c: Record<StepKey, boolean> & { estadoTarjeta: string; 
   }
   if (c.viaSeguros) return "En Vía Seguros";
   if (c.firmaCarta || c.firmaContrato) return "En firma";
-  if (c.documentos) return "Documentos";
+  if (c.cedula && c.tarjetaPropiedad && c.tarjetaOperacion) return "Documentos";
   if (c.dijoSi) return "Dijo sí";
   return "Nuevo";
 }
 
 export function hechosDe(c: Record<StepKey, boolean>) {
-  return STEPS.filter((s) => c[s.key]).length;
+  return pasosQueCuentan().filter((s) => c[s.key]).length;
 }
 
 export function conAvance<T extends Record<StepKey, boolean> & { estadoTarjeta: Caso["estadoTarjeta"]; motivoCierre?: string }>(c: T) {
   const hechos = hechosDe(c);
   return {
     ...c,
-    avance: Math.round((hechos / STEPS.length) * 100),
+    avance: Math.round((hechos / pasosQueCuentan().length) * 100),
     estado: estadoDe(c),
     hechos,
   };
@@ -273,7 +330,7 @@ export function casosDeArea(rows: Caso[], role: string) {
     return rows.filter((c) => c.mano === "operativa" || (!c.completado && (OPERATIVA_ESTADOS as readonly string[]).includes(c.estado)));
   }
   if (role === "servicio") {
-    return rows.filter((c) => c.mano === "servicio" || c.completado);
+    return rows.filter((c) => c.mano === "servicio" || c.completado || Boolean(c.citaFecha));
   }
   return rows;
 }
@@ -292,21 +349,17 @@ export function tableroDe(rows: Caso[]) {
 }
 
 const PEDIR = [
-  ["cedula", "cédula"],
+  ["cedula", "cédula del propietario"],
   ["tarjetaPropiedad", "tarjeta de propiedad"],
   ["tarjetaOperacion", "tarjeta de operación"],
-  ["soat", "SOAT"],
-  ["tecnomecanica", "tecnomecánica"],
 ] as const;
 
-export function siguientePaso(c: Pick<Caso, StepKey | "estadoTarjeta" | "motivoCierre" | "fechaCompra" | "polizaFase" | "polizaEntrega">) {
+export function siguientePaso(c: Pick<Caso, StepKey | "estadoTarjeta" | "motivoCierre" | "fechaCompra" | "polizaFase" | "polizaEntrega" | "citaFecha" | "entrega" | "areaMarcas" | "opTarjeta" | "tarjetaEntregada">) {
   if (c.completado) return "Proceso cerrado";
   if (c.motivoCierre.trim()) return c.motivoCierre.trim();
   if (!c.dijoSi) return "Confirmar que el propietario dijo sí";
   const falta = PEDIR.filter(([key]) => !c[key]).map(([, label]) => label);
   if (falta.length) return `Pedir ${falta.join(", ")}`;
-  if (!c.formulario) return "Llenar el formulario";
-  if (!c.documentos) return "Subir los documentos";
   if (!c.firmaCarta) return "Firmar la carta";
   if (!c.firmaContrato) return "Firmar el contrato";
   if (!c.plataPoliza) return "Confirmar la plata de la póliza";
@@ -320,27 +373,26 @@ export function siguientePaso(c: Pick<Caso, StepKey | "estadoTarjeta" | "motivoC
     if (c.polizaEntrega === "pide_foto" || c.polizaEntrega === "pide_final") return "Aceptar las pólizas que David va a entregar";
     if (!c.polizaEntrega) return "David: decir que va a entregar las pólizas";
   }
-  if (c.tarjetaEntregada) return "Marcar completado";
-  if (c.estadoTarjeta === "Expedida") return "Entregar la tarjeta al propietario";
-  if (c.estadoTarjeta === "Radicada") return "Esperar a que la tarjeta quede expedida";
-  if (c.estadoTarjeta === "Pendiente") return "Tarjeta pendiente en Operativa";
-  if (!c.operativa) return "Pasar a Operativa";
-  return "Dejar la tarjeta en pendiente, radicada o expedida";
+  const recibida = c.areaMarcas.includes("tarjeta_recibida") || c.opTarjeta === "entregada" || c.tarjetaEntregada || c.estadoTarjeta === "Expedida";
+  if (!recibida) {
+    if (c.estadoTarjeta === "Radicada") return "Esperar a que la tarjeta quede expedida";
+    if (c.estadoTarjeta === "Pendiente") return "Tarjeta pendiente en Operativa";
+    if (!c.operativa) return "Pasar a Operativa";
+    return "Dejar la tarjeta en pendiente, radicada o expedida";
+  }
+  if (!c.citaFecha) return "Agendar la cita de entrega";
+  const tiene = new Set(entregaIds(c.entrega));
+  if (!tiene.has("distintivos")) return "Recibir los distintivos con la jefe Asiyade";
+  if (!tiene.has("pegada")) return "Dejar el carro en distintivos y que firmen la planilla";
+  if (!tiene.has("tarjeta_nueva")) return "Entregar la tarjeta de operación nueva";
+  if (!["bono_rodamiento", "bono_app", "bono_distintivos", "bono_equipo", "bono_espia"].every((id) => tiene.has(id))) {
+    return "Entregar los bonos en servicio al cliente";
+  }
+  return "Bajar por el carro y marcar completado";
 }
 
 export function requisitosVia(c: Pick<Caso, StepKey>) {
-  return (
-    c.cedula &&
-    c.tarjetaPropiedad &&
-    c.tarjetaOperacion &&
-    c.soat &&
-    c.tecnomecanica &&
-    c.formulario &&
-    c.documentos &&
-    c.firmaCarta &&
-    c.firmaContrato &&
-    c.plataPoliza
-  );
+  return c.cedula && c.tarjetaPropiedad && c.tarjetaOperacion && c.firmaCarta && c.firmaContrato && c.plataPoliza;
 }
 
 export function listoParaVia(c: Pick<Caso, StepKey>) {

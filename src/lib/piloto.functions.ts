@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { hoyBogota } from "@/lib/casos";
+import { hoyBogota, entregaIds, entregaLista } from "@/lib/casos";
 import { DOCS_PILOTO, docsDe, etiquetaDoc, etiquetaMano, etiquetaMarca, MARCAS_OP, MARCAS_SERVICIO, MARCAS_VIA, marcasDe, type DocTipo, type OpTarjeta } from "@/lib/piloto";
 import { configura, esBandeja, llevaProcesos, manoDeRol, veElEquipo, type Role } from "@/lib/team.public";
 
@@ -27,6 +27,8 @@ type CasoMano = {
   completado: boolean;
   area_marcas: string;
   poliza_fase: string;
+  entrega: string;
+  cita_fecha: string;
 };
 
 const ROLES_BANDEJA = ["via_seguros", "operativa", "servicio"] as const;
@@ -53,7 +55,7 @@ async function perfil() {
 async function casoDe(id: number) {
   const sql = await getSql();
   const rows = await sql.query<CasoMano>(
-    `select id, owner_id, placa, mano, via_estado, polizas_subidas, operativa, docs_ocultos, estado_tarjeta, tarjeta_entregada, completado, area_marcas, poliza_fase from casos where id = $1`,
+    `select id, owner_id, placa, mano, via_estado, polizas_subidas, operativa, docs_ocultos, estado_tarjeta, tarjeta_entregada, completado, area_marcas, poliza_fase, entrega, cita_fecha from casos where id = $1`,
     [id],
   );
   return rows[0] ?? null;
@@ -63,7 +65,7 @@ function puedeVer(role: string, userId: string, caso: CasoMano) {
   if (veElEquipo(role) || llevaProcesos(role)) return userId === caso.owner_id || veElEquipo(role);
   if (role === "operativa") return caso.mano === "operativa" || caso.operativa || Boolean(caso.estado_tarjeta) || caso.tarjeta_entregada;
   if (role === "via_seguros") return caso.mano === "via";
-  if (role === "servicio") return caso.mano === "servicio" || caso.completado;
+  if (role === "servicio") return caso.mano === "servicio" || caso.completado || Boolean(caso.cita_fecha);
   return false;
 }
 
@@ -72,6 +74,7 @@ function puedeArchivo(role: string, tipo: string, caso: CasoMano, docsOperativa:
   if (role === "via_seguros") return tipo === "comprobante" || tipo === "contrato" || tipo === "carta";
   if (role === "operativa") {
     const ocultos = new Set(docsDe(caso.docs_ocultos));
+    if (tipo === "autorizacion") return !ocultos.has(tipo);
     return docsOperativa.includes(tipo) && !ocultos.has(tipo);
   }
   return false;
@@ -177,6 +180,22 @@ export const crearUsuarioBandeja = createServerFn({ method: "POST" })
     });
     return { ok: true, slug };
   });
+
+async function asegurarCargas(sql: Awaited<ReturnType<typeof getSql>>) {
+  await sql.query(
+    `create table if not exists carga_trozos (
+      carga_id text not null,
+      orden integer not null,
+      datos text not null,
+      caso_id integer not null default 0,
+      tipo text not null default '',
+      nombre text not null default '',
+      lectura text not null default '',
+      reemplaza_id integer not null default 0,
+      primary key (carga_id, orden)
+    )`,
+  );
+}
 
 async function quien(userId: string) {
   const { profileFor } = await perfil();
@@ -380,7 +399,7 @@ export const marcarServicio = createServerFn({ method: "POST" })
     const profile = await exigir(context.userId);
     const caso = await casoDe(data.id);
     if (!caso) throw new Error("No encontré ese proceso");
-    if (caso.mano !== "servicio" && !caso.completado) throw new Error("Ese proceso no está en servicio al cliente");
+    if (caso.mano !== "servicio" && !caso.completado && !caso.cita_fecha) throw new Error("Ese proceso no está en servicio al cliente");
     if (!configura(profile.role) && profile.role !== "servicio") throw new Error("Eso lo marca servicio al cliente");
     const bonos = data.bonos.trim().slice(0, 200);
     const beneficios = data.beneficios.map((b) => b.trim()).filter(Boolean).slice(0, 8).join(",");
@@ -397,6 +416,37 @@ export const marcarServicio = createServerFn({ method: "POST" })
     const { anotar } = await import("./auditoria.server");
     await anotar(profile, { accion: "edito", entidad: "proceso", entidadId: caso.id, etiqueta: caso.placa, detalle: texto });
     return { ok: true };
+  });
+
+const ENTREGA_OP = ["carta", "tarjeta_nueva", "tarjeton"];
+const ENTREGA_SERVICIO = ["bono_rodamiento", "bono_app", "bono_distintivos", "bono_equipo", "bono_espia"];
+
+export const marcarEntrega = createServerFn({ method: "POST" })
+  .validator((input: { id: number; marca: string; on: boolean }) => input)
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const profile = await exigir(context.userId);
+    const caso = await casoDe(data.id);
+    if (!caso) throw new Error("No encontré ese proceso");
+    const lider = configura(profile.role);
+    if (!lider && profile.role === "operativa" && !ENTREGA_OP.includes(data.marca)) throw new Error("Esa marca no es de operativa");
+    if (!lider && profile.role === "servicio" && !ENTREGA_SERVICIO.includes(data.marca)) throw new Error("Esa marca no es de servicio al cliente");
+    if (!lider && profile.role !== "operativa" && profile.role !== "servicio") throw new Error("Eso lo marca el área");
+    if (!lider && !puedeVer(profile.role, context.userId, caso)) throw new Error("Ese proceso no está en tu área");
+    const ids = new Set(entregaIds(caso.entrega));
+    if (data.on) ids.add(data.marca);
+    else ids.delete(data.marca);
+    const lista = entregaLista([...ids].join(","));
+    const sql = await getSql();
+    await sql.query(
+      `update casos set entrega = $1, mano = case when $3 and $4 then 'servicio' else mano end, updated_at = now() where id = $2`,
+      [lista, caso.id, data.marca === "tarjeta_nueva", data.on],
+    );
+    const texto = `${profile.name} ${data.on ? "marcó" : "quitó"} la entrega de ${caso.placa}.`;
+    await aviso(caso.id, context.userId, texto);
+    const { anotar } = await import("./auditoria.server");
+    await anotar(profile, { accion: "edito", entidad: "proceso", entidadId: caso.id, etiqueta: caso.placa, detalle: texto });
+    return { entrega: lista };
   });
 
 export const listarDocumentos = createServerFn({ method: "POST" })
@@ -469,6 +519,157 @@ export const subirDocumento = createServerFn({ method: "POST" })
       detalle: `Subió ${etiquetaDoc(tipo)} en ${caso.placa}: ${nombre}`,
     });
     return { ok: true };
+  });
+
+export const recibirTrozo = createServerFn({ method: "POST" })
+  .validator((input: { cargaId: string; orden: number; datos: string; fin: boolean; casoId: number; tipo: string; nombre: string; lectura?: string; reemplazaId?: number }) => input)
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    if (!/^[\w-]{8,80}$/.test(data.cargaId)) throw new Error("La carga no sirve");
+    if (data.orden < 0 || data.orden > 80) throw new Error("La carga no sirve");
+    if (data.datos.length > 700_000) throw new Error("El trozo es muy grande");
+    const profile = await quien(context.userId);
+    const caso = await casoDe(data.casoId);
+    if (!caso || !puedeVer(profile.role, context.userId, caso)) throw new Error("No encontré ese proceso");
+    const dueno = (caso.owner_id === context.userId && llevaProcesos(profile.role)) || configura(profile.role);
+    if (!dueno) throw new Error("Los documentos los sube el asesor");
+    const tipo = tipoDoc(data.tipo);
+    const nombre = data.nombre.trim().slice(0, 120) || etiquetaDoc(tipo);
+    const sql = await getSql();
+    await asegurarCargas(sql);
+    await sql.query(
+      `insert into carga_trozos (carga_id, orden, datos, caso_id, tipo, nombre, lectura, reemplaza_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       on conflict (carga_id, orden) do update set datos = excluded.datos`,
+      [data.cargaId, data.orden, data.datos, caso.id, tipo, nombre, (data.lectura ?? "").slice(0, 8000), data.reemplazaId ?? 0],
+    );
+    if (!data.fin) return { ok: true };
+    const partes = await sql.query<{ datos: string }>(
+      `select datos from carga_trozos where carga_id = $1 order by orden`,
+      [data.cargaId],
+    );
+    const archivo = partes.map((parte) => parte.datos).join("");
+    await sql.query(`delete from carga_trozos where carga_id = $1`, [data.cargaId]);
+    if (archivo.length < 40) throw new Error("El archivo llegó vacío");
+    if (archivo.length > 42_000_000) throw new Error("El archivo pesa más de 30 MB");
+    const { guardarEnDrive } = await import("./drive.server");
+    const drive = await guardarEnDrive(`${caso.placa}-${nombre}`, archivo, caso.placa);
+    const copia = drive.enLaNube ? "" : archivo;
+    const lectura = (data.lectura ?? "").slice(0, 8000);
+    if (data.reemplazaId) {
+      const previos = await sql.query<{ drive_id: string }>(`select drive_id from documentos where id = $1 and caso_id = $2`, [data.reemplazaId, caso.id]);
+      const previo = previos[0];
+      if (!previo) throw new Error("No encontré ese archivo");
+      if (previo.drive_id && previo.drive_id !== drive.id) {
+        const { borrarDeDrive } = await import("./drive.server");
+        await borrarDeDrive(previo.drive_id);
+      }
+      await sql.query(`update documentos set nombre = $1, archivo = $2, drive_id = $3 where id = $4`, [nombre, copia, drive.id || previo.drive_id, data.reemplazaId]);
+    } else if (tipo === "contrato") {
+      const ya = await sql.query<{ id: number; drive_id: string }>(
+        `select id, drive_id from documentos where caso_id = $1 and tipo = 'contrato' order by id desc limit 1`,
+        [caso.id],
+      );
+      if (ya[0]) {
+        if (ya[0].drive_id && ya[0].drive_id !== drive.id) {
+          const { borrarDeDrive } = await import("./drive.server");
+          await borrarDeDrive(ya[0].drive_id);
+        }
+        await sql.query(`update documentos set nombre = $1, archivo = $2, subido_por = $3, drive_id = $4, lectura = $5 where id = $6`, [
+          nombre, copia, profile.name, drive.id || ya[0].drive_id, lectura, ya[0].id,
+        ]);
+      } else {
+        await sql.query(
+          `insert into documentos (caso_id, tipo, nombre, archivo, subido_por, drive_id, lectura) values ($1, $2, $3, $4, $5, $6, $7)`,
+          [caso.id, tipo, nombre, copia, profile.name, drive.id, lectura],
+        );
+      }
+    } else {
+      await sql.query(
+        `insert into documentos (caso_id, tipo, nombre, archivo, subido_por, drive_id, lectura) values ($1, $2, $3, $4, $5, $6, $7)`,
+        [caso.id, tipo, nombre, copia, profile.name, drive.id, lectura],
+      );
+    }
+    if (tipo === "comprobante" && caso.mano === "via") {
+      await sql.query(`update casos set via_estado = 'comprobante', updated_at = now() where id = $1 and via_estado in ('pedido', 'enlace', 'no_coincide')`, [caso.id]);
+      await aviso(caso.id, context.userId, `El asesor subió el comprobante de pago de ${caso.placa}.`);
+    }
+    if (tipo !== "comprobante") {
+      await sql.query(`update casos set documentos = true, updated_at = now() where id = $1`, [caso.id]);
+    }
+    const { anotar } = await import("./auditoria.server");
+    await anotar(profile, {
+      accion: data.reemplazaId ? "cambio" : "subio",
+      entidad: "proceso",
+      entidadId: caso.id,
+      etiqueta: caso.placa,
+      detalle: `${data.reemplazaId ? "Cambió" : "Subió"} ${etiquetaDoc(tipo)} en ${caso.placa}: ${nombre}`,
+    });
+    return { ok: true };
+  });
+
+export const parteDocumento = createServerFn({ method: "POST" })
+  .validator((input: { id: number; desde: number }) => input)
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const { profileFor } = await perfil();
+    const profile = await profileFor(context.userId);
+    if (!profile) throw new Error("No encontré tu usuario");
+    const sql = await getSql();
+    const cargaId = `doc-${data.id}`;
+    const desde = Math.max(0, data.desde);
+    await asegurarCargas(sql);
+    if (desde === 0) {
+      const rows = await sql.query<{ caso_id: number; tipo: string; nombre: string; archivo: string; drive_id: string }>(
+        `select caso_id, tipo, nombre, archivo, drive_id from documentos where id = $1`,
+        [data.id],
+      );
+      const doc = rows[0];
+      if (!doc) throw new Error("No encontré ese archivo");
+      const caso = await casoDe(Number(doc.caso_id));
+      if (!caso || !puedeVer(profile.role, context.userId, caso)) throw new Error("No encontré ese archivo");
+      const permitidos = await docsOperativa();
+      if (!puedeArchivo(profile.role, doc.tipo, caso, permitidos)) throw new Error("Ese documento no está habilitado para tu área");
+      let archivo = doc.archivo;
+      if (!archivo && doc.drive_id) {
+        const { leerDeDrive } = await import("./drive.server");
+        archivo = await leerDeDrive(doc.drive_id);
+      }
+      if (!archivo) throw new Error("El archivo no está en Drive ni en el programa");
+      await sql.query(`delete from carga_trozos where carga_id = $1`, [cargaId]);
+      const tope = 600_000;
+      for (let i = 0, orden = 0; i < archivo.length; i += tope, orden += 1) {
+        await sql.query(
+          `insert into carga_trozos (carga_id, orden, datos, caso_id, tipo, nombre) values ($1, $2, $3, $4, $5, $6)`,
+          [cargaId, orden, archivo.slice(i, i + tope), caso.id, doc.tipo, doc.nombre],
+        );
+      }
+    }
+    const orden = Math.floor(desde / 600_000);
+    const trozo = await sql.query<{ datos: string; nombre: string }>(
+      `select datos, nombre from carga_trozos where carga_id = $1 and orden = $2`,
+      [cargaId, orden],
+    );
+    const cuenta = await sql.query<{ n: string }>(`select coalesce(sum(length(datos)), 0)::text as n from carga_trozos where carga_id = $1`, [cargaId]);
+    const item = trozo[0];
+    if (!item) throw new Error("No encontré ese archivo");
+    return { nombre: item.nombre, total: Number(cuenta[0]?.n ?? 0), datos: item.datos };
+  });
+
+export const parteCarga = createServerFn({ method: "POST" })
+  .validator((input: { cargaId: string; desde: number }) => input)
+  .middleware([authMiddleware])
+  .handler(async ({ data }) => {
+    if (!/^paq-\d+-\d+$/.test(data.cargaId)) throw new Error("No encontré ese archivo");
+    const sql = await getSql();
+    const orden = Math.floor(Math.max(0, data.desde) / 600_000);
+    const trozo = await sql.query<{ datos: string }>(
+      `select datos from carga_trozos where carga_id = $1 and orden = $2`,
+      [data.cargaId, orden],
+    );
+    const item = trozo[0];
+    if (!item) throw new Error("No encontré ese archivo");
+    return { datos: item.datos };
   });
 
 export const leerDocumento = createServerFn({ method: "POST" })
@@ -790,7 +991,19 @@ export const bajarPaquete = createServerFn({ method: "POST" })
     }
     if (!metio) throw new Error("Esos archivos no se pudieron juntar. Bájalos uno por uno.");
     const pdf = await out.save();
-    return { nombre: `${caso.placa}-paquete.pdf`, archivo: base64De(pdf) };
+    const archivo = base64De(pdf);
+    const nombre = `${caso.placa}-paquete.pdf`;
+    if (archivo.length <= 600_000) return { nombre, archivo, cargaId: "", total: archivo.length };
+    await asegurarCargas(sql);
+    const cargaId = `paq-${caso.id}-${Date.now()}`;
+    const tope = 600_000;
+    for (let i = 0, orden = 0; i < archivo.length; i += tope, orden += 1) {
+      await sql.query(
+        `insert into carga_trozos (carga_id, orden, datos, caso_id, nombre) values ($1, $2, $3, $4, $5)`,
+        [cargaId, orden, archivo.slice(i, i + tope), caso.id, nombre],
+      );
+    }
+    return { nombre, archivo: "", cargaId, total: archivo.length };
   });
 
 function bytesDe(value: string) {
