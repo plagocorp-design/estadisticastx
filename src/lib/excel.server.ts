@@ -515,7 +515,7 @@ function textoCelda(valor: unknown): string {
 
 export async function leerRespaldo(archivo: string) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(Buffer.from(archivo, "base64") as unknown as Buffer);
+  await wb.xlsx.load(Buffer.from(archivo, "base64") as never);
   const hojas: Record<string, Record<string, string>[]> = {};
   for (const sheet of wb.worksheets) {
     const encabezado = (sheet.getRow(1).values as unknown[]).slice(1).map((item) => textoCelda(item).trim());
