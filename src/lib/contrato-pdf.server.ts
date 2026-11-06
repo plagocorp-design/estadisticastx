@@ -48,15 +48,24 @@ export async function montarContrato(
   plantilla?: { pdf: string; campos: CampoContrato[] },
 ) {
   const doc = await PDFDocument.load(Buffer.from(plantilla?.pdf || PLANTILLA, "base64"));
-  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fuentes: Record<string, StandardFonts> = {
+    helvetica: StandardFonts.Helvetica,
+    "helvetica-bold": StandardFonts.HelveticaBold,
+    times: StandardFonts.TimesRoman,
+    courier: StandardFonts.Courier,
+  };
+  const embebidas = new Map<string, Awaited<ReturnType<typeof doc.embedFont>>>();
+  for (const [clave, cual] of Object.entries(fuentes)) embebidas.set(clave, await doc.embedFont(cual));
   const paginas = doc.getPages();
   const [pagina, firma, datosPersonales] = paginas;
   const fecha = fechaBogota(cuando);
 
-  function texto(page: (typeof pagina) | undefined, value: string, x: number, y: number, size = 8) {
+  function texto(page: (typeof pagina) | undefined, value: string, x: number, y: number, size = 8, fuente?: string) {
     const limpio = seguro(value);
     if (!limpio || !page) return;
-    page.drawText(limpio, { x, y, size, font, color: tinta });
+    const letra = embebidas.get(fuente && embebidas.has(fuente) ? fuente : "helvetica") ?? embebidas.get("helvetica");
+    if (!letra) return;
+    page.drawText(limpio, { x, y, size, font: letra, color: tinta });
   }
 
   const duenos = duenosDe(datos);
@@ -86,7 +95,7 @@ export async function montarContrato(
   if (plantilla?.campos.length) {
     for (const campo of plantilla.campos) {
       if (campo.campo === "firma") continue;
-      texto(paginas[campo.pagina], valores[campo.campo] ?? "", campo.x, campo.y, campo.size);
+      texto(paginas[campo.pagina], valores[campo.campo] ?? "", campo.x, campo.y, campo.size, campo.fuente);
     }
   } else {
     texto(pagina, nombres, 60, 852, nombres.length > 42 ? 8 : 10);

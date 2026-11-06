@@ -602,6 +602,36 @@ export const parteContrato = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const seriePais = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    await exigirGerencia(context.userId);
+    const sql = await getSql();
+    return sql.query<{ mes: string; ciudad: string; procesos: number; polizas: number; completados: number }>(
+      `select to_char(c.created_at at time zone 'America/Bogota', 'YYYY-MM') as mes,
+              coalesce(ci.nombre, 'Bogotá') as ciudad,
+              count(*)::int as procesos,
+              count(*) filter (where c.polizas_subidas)::int as polizas,
+              count(*) filter (where c.completado)::int as completados
+       from casos c
+       left join ciudades ci on ci.id = c.ciudad_id
+       group by 1, 2
+       order by 1, 2`,
+    );
+  });
+
+export const pdfDeCiudad = createServerFn({ method: "GET" })
+  .validator((ciudadId: number) => ciudadId)
+  .middleware([authMiddleware])
+  .handler(async ({ context, data: ciudadId }) => {
+    await exigirGerencia(context.userId);
+    const sql = await getSql();
+    const rows = await sql.query<{ contrato_pdf: string }>(`select contrato_pdf from ciudad_config where ciudad_id = $1`, [ciudadId]);
+    if (rows[0]?.contrato_pdf) return { pdf: rows[0].contrato_pdf, oficial: false };
+    const { PLANTILLA } = await import("./contrato-plantilla");
+    return { pdf: PLANTILLA, oficial: true };
+  });
+
 export async function plantillaDeCaso(casoId: number) {
   const sql = await getSql();
   const rows = await sql.query<{ contrato_pdf: string; contrato_campos: string }>(

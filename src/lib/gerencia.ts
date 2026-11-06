@@ -21,7 +21,14 @@ export type FlujoConfig = {
   operativaAntesDePago: boolean;
 };
 
-export type CampoContrato = { campo: string; pagina: number; x: number; y: number; size: number };
+export type CampoContrato = {
+  campo: string;
+  pagina: number;
+  x: number;
+  y: number;
+  size: number;
+  fuente?: string;
+};
 
 export type CiudadConfig = {
   documentos: DocConfig[];
