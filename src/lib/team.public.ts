@@ -1,4 +1,4 @@
-export type Role = "asesor" | "lider" | "coordinadora" | "via_seguros" | "operativa" | "servicio";
+export type Role = "asesor" | "lider" | "coordinadora" | "via_seguros" | "operativa" | "servicio" | "gerencia";
 
 export const TEAM_PUBLIC: { slug: string; name: string; email: string; role: Role }[] = [
   { slug: "david", name: "David Jaimes", email: "david@vinculalibre.app", role: "lider" },
@@ -11,10 +11,15 @@ export const TEAM_PUBLIC: { slug: string; name: string; email: string; role: Rol
   { slug: "franz", name: "Franz", email: "franz@vinculalibre.app", role: "coordinadora" },
   { slug: "asiyade", name: "Asiyade", email: "asiyade@vinculalibre.app", role: "coordinadora" },
   { slug: "pablo", name: "Pablo", email: "pablo@vinculalibre.app", role: "coordinadora" },
+  { slug: "gerencia", name: "Gerencia Taxis Libres", email: "gerencia@vinculalibre.app", role: "gerencia" },
 ];
 
+export function esGerencia(role: string | null | undefined) {
+  return role === "gerencia";
+}
+
 export function veElEquipo(role: string | null | undefined) {
-  return role === "coordinadora" || role === "lider";
+  return role === "coordinadora" || role === "lider" || role === "gerencia";
 }
 
 export function configura(role: string | null | undefined) {
@@ -26,6 +31,7 @@ export function llevaProcesos(role: string | null | undefined) {
 }
 
 export function etiquetaRol(role: string | null | undefined) {
+  if (role === "gerencia") return "Gerencia";
   if (role === "lider") return "Asesor líder";
   if (role === "coordinadora") return "Coordinación";
   if (role === "via_seguros") return "Vía Seguros";

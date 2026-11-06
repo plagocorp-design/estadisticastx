@@ -3,10 +3,10 @@ import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { cambiosDe, siNo, textoPlano } from "@/lib/auditoria";
 import { casosDeArea, entregaDe, entregaLista, faseDe, hoyBogota, otrosPropietarios, STEPS, toCaso, type Caso, type CasoDraft, type CasoRow, type StepKey } from "@/lib/casos";
-import { configura, esBandeja, llevaProcesos, veElEquipo, type Role } from "@/lib/team.public";
+import { configura, esBandeja, esGerencia, llevaProcesos, veElEquipo, type Role } from "@/lib/team.public";
 import { unificarEmpresa } from "@/lib/empresas";
 
-export type Me = { id: string; name: string; slug: string; role: Role };
+export type Me = { id: string; name: string; slug: string; role: Role; ciudadVista: number | null };
 
 export const CASO_COLS = `
   c.id, c.owner_id, p.name as owner_name, c.placa, c.cc, c.nombre, c.telefono, c.empresa,
@@ -36,7 +36,7 @@ export const getMe = createServerFn({ method: "GET" })
     const { profileFor } = await import("./team.server");
     const profile = await profileFor(context.userId);
     if (!profile) return null;
-    return { id: profile.user_id, name: profile.name, slug: profile.slug, role: profile.role };
+    return { id: profile.user_id, name: profile.name, slug: profile.slug, role: profile.role, ciudadVista: profile.ciudad_vista };
   });
 
 export const listCasos = createServerFn({ method: "GET" })
@@ -56,13 +56,16 @@ export const listCasos = createServerFn({ method: "GET" })
        where polizas_subidas = true and fecha_poliza = ''`,
       [hoy],
     );
+    const ciudad = esGerencia(profile.role) ? (profile.ciudad_vista ?? 0) : (profile.ciudad_id ?? 1);
+    const filtroCiudad = ` and coalesce(c.ciudad_id, 1) = ${ciudad} `;
     const rows = veElEquipo(profile.role) || esBandeja(profile.role)
       ? await sql.query<CasoRow>(
-          `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id order by c.created_at desc`,
+          `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id where coalesce(c.ciudad_id, 1) = $1 order by c.created_at desc`,
+          [ciudad],
         )
       : await sql.query<CasoRow>(
-          `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id where c.owner_id = $1 order by c.created_at desc`,
-          [context.userId],
+          `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id where c.owner_id = $1 and coalesce(c.ciudad_id, 1) = $2 order by c.created_at desc`,
+          [context.userId, ciudad],
         );
     const lista = (esBandeja(profile.role) ? casosDeArea(rows.map(toCaso), profile.role) : rows.map(toCaso));
     const ultimos = await sql.query<{ entidad_id: string; actor_name: string; created_at: string }>(
@@ -188,6 +191,12 @@ export const createCaso = createServerFn({ method: "POST" })
       returning id
     `;
     const id = rows[0]?.id ?? 0;
+    if (id) {
+      await sql.query(
+        `update casos set ciudad_id = coalesce((select ciudad_id from profiles where user_id = $1), (select ciudad_vista from profiles where user_id = $2), 1) where id = $3`,
+        [ownerId, context.userId, id],
+      );
+    }
     const { anotar } = await import("./auditoria.server");
     await anotar(profile, {
       accion: "creo",

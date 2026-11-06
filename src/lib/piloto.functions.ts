@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { hoyBogota, entregaIds, entregaLista } from "@/lib/casos";
-import { DOCS_PILOTO, docsDe, etiquetaDoc, etiquetaMano, etiquetaMarca, MARCAS_OP, MARCAS_SERVICIO, MARCAS_VIA, marcasDe, type DocTipo, type OpTarjeta } from "@/lib/piloto";
+import { DOCS_PILOTO, copiasAlImprimir, docsDe, etiquetaDoc, etiquetaMano, etiquetaMarca, MARCAS_OP, MARCAS_SERVICIO, MARCAS_VIA, marcasDe, tipoVisible, type DocTipo, type OpTarjeta } from "@/lib/piloto";
 import { configura, esBandeja, llevaProcesos, manoDeRol, veElEquipo, type Role } from "@/lib/team.public";
 
 export type PilotoEstado = {
@@ -29,6 +29,7 @@ type CasoMano = {
   poliza_fase: string;
   entrega: string;
   cita_fecha: string;
+  ciudad_id: number | null;
 };
 
 const ROLES_BANDEJA = ["via_seguros", "operativa", "servicio"] as const;
@@ -42,10 +43,12 @@ function plano(value: string) {
     .replace(/[^a-z0-9]/g, "");
 }
 
-function tipoDoc(value: string): DocTipo {
+function tipoDoc(value: string): string {
   const tipo = DOCS_PILOTO.find((d) => d.id === value);
-  if (!tipo) throw new Error("Ese documento no está en la lista");
-  return tipo.id;
+  if (tipo) return tipo.id;
+  const limpio = value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+  if (!/^[a-z0-9_]{2,40}$/.test(limpio)) throw new Error("Ese documento no está en la lista");
+  return limpio;
 }
 
 async function perfil() {
@@ -55,7 +58,7 @@ async function perfil() {
 async function casoDe(id: number) {
   const sql = await getSql();
   const rows = await sql.query<CasoMano>(
-    `select id, owner_id, placa, mano, via_estado, polizas_subidas, operativa, docs_ocultos, estado_tarjeta, tarjeta_entregada, completado, area_marcas, poliza_fase, entrega, cita_fecha from casos where id = $1`,
+    `select id, owner_id, placa, mano, via_estado, polizas_subidas, operativa, docs_ocultos, estado_tarjeta, tarjeta_entregada, completado, area_marcas, poliza_fase, entrega, cita_fecha, ciudad_id from casos where id = $1`,
     [id],
   );
   return rows[0] ?? null;
@@ -75,7 +78,7 @@ function puedeArchivo(role: string, tipo: string, caso: CasoMano, docsOperativa:
   if (role === "operativa") {
     const ocultos = new Set(docsDe(caso.docs_ocultos));
     if (tipo === "autorizacion") return !ocultos.has(tipo);
-    return docsOperativa.includes(tipo) && !ocultos.has(tipo);
+    return docsOperativa.includes(tipoVisible(tipo)) && !ocultos.has(tipo) && !ocultos.has(tipoVisible(tipo));
   }
   return false;
 }
@@ -238,9 +241,16 @@ export const pasarMano = createServerFn({ method: "POST" })
     } else if (data.mano === "operativa") {
       if (!dueno && !lider) throw new Error("Lo pasa el asesor del proceso");
       if (caso.mano === "operativa" || caso.mano === "servicio") throw new Error("Ese proceso ya salió de esta mano");
-      if (!caso.polizas_subidas && caso.via_estado !== "recibido") throw new Error("Primero Vía Seguros tiene que recibir el pago");
-      await sql.query(`update casos set mano = 'operativa', mano_asignado = '', operativa = true, via_seguros = true, updated_at = now() where id = $1`, [caso.id]);
-      texto = `Pasó ${caso.placa} a operativa, con los documentos que pueden ver.`;
+      const { flujoDeCiudad } = await import("./gerencia.functions");
+      const flujo = await flujoDeCiudad(caso.ciudad_id);
+      if (!flujo.operativaAntesDePago && !caso.polizas_subidas && caso.via_estado !== "recibido") {
+        throw new Error("En esta ciudad, operativa espera a que Vía Seguros reciba el pago");
+      }
+      await sql.query(
+        `update casos set mano = 'operativa', mano_asignado = '', operativa = true, docs_ocultos = '', updated_at = now() where id = $1`,
+        [caso.id],
+      );
+      texto = `Pasó ${caso.placa} a operativa. Ya pueden ver los documentos.`;
     } else if (data.mano === "asesor") {
       if (!lider && profile.role !== "operativa") throw new Error("Lo devuelve operativa");
       if (caso.mano !== "operativa") throw new Error("Ese proceso no está en operativa");
@@ -966,23 +976,31 @@ export const bajarPaquete = createServerFn({ method: "POST" })
       if (!crudo) continue;
       const raw = bytesDe(crudo);
       const nombre = doc.nombre.toLowerCase();
+      const vecesConfig = await (await import("./gerencia.functions")).copiasConfig(caso.ciudad_id, doc.tipo);
+      const veces = vecesConfig && vecesConfig > 0 ? vecesConfig : copiasAlImprimir(doc.tipo);
       try {
         if (nombre.endsWith(".pdf") || (raw[0] === 0x25 && raw[1] === 0x50)) {
           const src = await PDFDocument.load(raw, { ignoreEncryption: true });
-          const pages = await out.copyPages(src, src.getPageIndices());
-          for (const page of pages) out.addPage(page);
+          for (let copia = 0; copia < veces; copia += 1) {
+            const pages = await out.copyPages(src, src.getPageIndices());
+            for (const page of pages) out.addPage(page);
+          }
           metio += 1;
         } else if (nombre.endsWith(".jpg") || nombre.endsWith(".jpeg") || raw[0] === 0xff) {
           const img = await out.embedJpg(raw);
-          const page = out.addPage([612, 792]);
-          const scale = Math.min(560 / img.width, 740 / img.height);
-          page.drawImage(img, { x: 26, y: 792 - 26 - img.height * scale, width: img.width * scale, height: img.height * scale });
+          for (let copia = 0; copia < veces; copia += 1) {
+            const page = out.addPage([612, 792]);
+            const scale = Math.min(560 / img.width, 740 / img.height);
+            page.drawImage(img, { x: 26, y: 792 - 26 - img.height * scale, width: img.width * scale, height: img.height * scale });
+          }
           metio += 1;
         } else if (nombre.endsWith(".png") || raw[0] === 0x89) {
           const img = await out.embedPng(raw);
-          const page = out.addPage([612, 792]);
-          const scale = Math.min(560 / img.width, 740 / img.height);
-          page.drawImage(img, { x: 26, y: 792 - 26 - img.height * scale, width: img.width * scale, height: img.height * scale });
+          for (let copia = 0; copia < veces; copia += 1) {
+            const page = out.addPage([612, 792]);
+            const scale = Math.min(560 / img.width, 740 / img.height);
+            page.drawImage(img, { x: 26, y: 792 - 26 - img.height * scale, width: img.width * scale, height: img.height * scale });
+          }
           metio += 1;
         }
       } catch {

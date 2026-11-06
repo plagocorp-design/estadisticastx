@@ -59,8 +59,10 @@ import {
   type CasoDraft,
   type StepKey,
 } from "@/lib/casos";
-import { ASESORES, configura, esBandeja, etiquetaRol, llevaProcesos, nombreLista, veElEquipo } from "@/lib/team.public";
+import { ASESORES, configura, esBandeja, esGerencia, etiquetaRol, llevaProcesos, nombreLista, veElEquipo } from "@/lib/team.public";
 import { BloquePiloto } from "@/components/piloto";
+import { GerenciaVista } from "@/components/gerencia";
+import { configMia, entrarCiudad, leerPasosExtra, marcarPasoExtra, salirCiudad } from "@/lib/gerencia.functions";
 import { estadoPiloto, pasarMano } from "@/lib/piloto.functions";
 import { etiquetaMarca, marcasDe } from "@/lib/piloto";
 import { buscarEmpresas, unificarEmpresa } from "@/lib/empresas";
@@ -145,6 +147,7 @@ export function Board() {
   const [bitacoras, setBitacoras] = useState<Bitacora[]>([]);
   const [equipo, setEquipo] = useState<PersonaEquipo[]>([]);
   const [hora, setHora] = useState(horaBogota);
+  const [avisoBitacora, setAvisoBitacora] = useState("Son más de las 4:30. Falta tu bitácora de hoy.");
   const [modo, setModo] = useState<"mio" | "equipo">("equipo");
   const [pilotoOn, setPilotoOn] = useState(false);
   const hoy = hoyBogota();
@@ -163,6 +166,15 @@ export function Board() {
       return [];
     }
     setMe(who);
+    if (esGerencia(who.role) && !who.ciudadVista) {
+      setCasos([]);
+      return [];
+    }
+    configMia()
+      .then((conf) => {
+        if (conf.textos.bitacora_aviso) setAvisoBitacora(conf.textos.bitacora_aviso);
+      })
+      .catch(() => {});
     setCasos(rows);
     setAgenda(citas);
     setChats(porCaso(hilos));
@@ -364,6 +376,18 @@ export function Board() {
     return <p className="grid min-h-screen place-items-center text-ink-soft">Cargando…</p>;
   }
 
+  if (esGerencia(me.role) && !me.ciudadVista) {
+    return (
+      <GerenciaVista
+        nombre={me.name}
+        onEntrar={async (ciudadId) => {
+          await entrarCiudad({ data: ciudadId });
+          await load();
+        }}
+      />
+    );
+  }
+
   const titulo =
     vista === "agenda"
       ? "Agenda"
@@ -426,6 +450,15 @@ export function Board() {
             <p className="mt-1 text-xs text-paper">{soyDavid ? "Asesor líder" : delEquipo ? "Coordinación" : etiquetaRol(me.role)}</p>
           </div>
         </div>
+        {esGerencia(me.role) ? (
+          <button
+            type="button"
+            className="mt-4 h-10 rounded-2xl border border-paper/30 px-3 text-sm font-semibold"
+            onClick={() => void salirCiudad().then(() => load())}
+          >
+            Volver al país
+          </button>
+        ) : null}
         {soyDavid ? (
           <div className="mt-5">
             <ModoSwitch modo={modo} onChange={elegirModo} invert />
@@ -699,7 +732,7 @@ export function Board() {
             className="mb-4 w-full rounded-card border border-danger bg-card px-4 py-3 text-left text-sm font-semibold text-danger"
           >
             {llevaProcesos(me.role) && faltanVisibles.some((a) => a.slug === me.slug)
-              ? `Son más de las 4:30. Falta tu bitácora de hoy.${
+              ? `${avisoBitacora}${
                   faltanVisibles.length > 1
                     ? ` También: ${faltanVisibles
                         .filter((a) => a.slug !== me.slug)
@@ -1459,15 +1492,34 @@ function Panel({
   ownerRef.current = ownerSlug;
   pdfRef.current = { pdf: pdfNuevo, nombre: nombrePdf };
   const vivo = form ? conAvance(form) : null;
+  const [pasosCfg, setPasosCfg] = useState<Record<string, { label: string; activo: boolean }>>({});
+  const [extras, setExtras] = useState<{ key: string; label: string }[]>([]);
+  const [marcasExtra, setMarcasExtra] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    configMia()
+      .then((conf) => {
+        const mapa: Record<string, { label: string; activo: boolean }> = {};
+        for (const paso of conf.pasos) mapa[paso.key] = { label: paso.label, activo: paso.activo };
+        setPasosCfg(mapa);
+        setExtras(conf.pasos.filter((paso) => paso.activo && !STEPS.some((item) => item.key === paso.key)));
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!form?.id) return;
+    leerPasosExtra({ data: form.id }).then(setMarcasExtra).catch(() => {});
+  }, [form?.id]);
   const grupos = useMemo(
     () =>
       GRUPOS.map((g) => ({
         g,
         steps: STEPS.filter(
           (s) => s.group === g && !["soat", "tecnomecanica", "formulario", "documentos", "completado"].includes(s.key),
-        ),
+        )
+          .filter((s) => pasosCfg[s.key]?.activo !== false || Boolean(form?.[s.key]))
+          .map((s) => ({ ...s, label: pasosCfg[s.key]?.label || s.label })),
       })),
-    [],
+    [pasosCfg, form],
   );
 
   useEffect(() => {
@@ -2028,7 +2080,7 @@ function Panel({
                 miSlug={miSlug}
                 activo
                 soloDocs
-                soloTipos={["unificado", "cedula", "tarjeta_propiedad", "tarjeta_operacion", "contrato"]}
+                soloTipos={["unificado", "cedula", "cedula_frente", "cedula_reverso", "tarjeta_propiedad", "tarjeta_propiedad_frente", "tarjeta_propiedad_reverso", "tarjeta_operacion", "contrato"]}
                 onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))}
                 onListo={() => {
                   onChat();
@@ -2244,6 +2296,28 @@ function Panel({
                 </>
               ) : null}
               <div className="order-first grid content-start gap-4">
+                {pestana === "inicio" && extras.length > 0 ? (
+                  <fieldset>
+                    <legend className="mb-2 text-xs font-semibold tracking-wide text-ink-soft uppercase">Agregados por gerencia</legend>
+                    <div className="grid gap-2">
+                      {extras.map((paso) => (
+                        <button
+                          key={paso.key}
+                          type="button"
+                          disabled={!canEdit}
+                          onClick={() => {
+                            const on = !marcasExtra[paso.key];
+                            setMarcasExtra((actual) => ({ ...actual, [paso.key]: on }));
+                            void marcarPasoExtra({ data: { casoId: form.id, paso: paso.key, on } });
+                          }}
+                          className={"flex h-11 items-center gap-2 rounded-2xl border px-3 text-left text-sm font-semibold " + (marcasExtra[paso.key] ? "border-navy bg-navy text-paper" : "border-line")}
+                        >
+                          {marcasExtra[paso.key] ? "Sí" : "No"} {paso.label}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
                 {grupos.filter(({ g }) => g === (pestana === "inicio" ? "Inicio" : pestana === "documentos" ? "Documentos" : pestana === "firma" ? "Firma" : pestana === "poliza" ? "Póliza" : pestana === "tarjeta" ? "Tarjeta" : "")).map(({ g, steps }) => {
                   const listos = steps.filter((s) => form[s.key]).length;
                   return (

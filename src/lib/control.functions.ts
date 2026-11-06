@@ -21,7 +21,7 @@ function horaValida(value: string) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-async function personasDe(hoy: string, soloId?: string) {
+async function personasDe(hoy: string, soloId?: string, ciudadId?: number) {
   const sql = await getSql();
   const gente = await sql.query<{
     user_id: string;
@@ -51,8 +51,9 @@ async function personasDe(hoy: string, soloId?: string) {
          from profiles p
          left join equipo_extra e on e.owner_id = p.user_id
          where p.role in ('asesor', 'lider', 'coordinadora')
+           and coalesce(p.ciudad_id, 1) = $2
          order by p.name`,
-    soloId ? [soloId, META_EMPIEZA] : [META_EMPIEZA],
+    soloId ? [soloId, META_EMPIEZA] : [META_EMPIEZA, ciudadId ?? 1],
   );
   const dias = await sql.query<{ slug: string; cuenta: number }>(
     `select p.slug, d.cuenta
@@ -135,7 +136,8 @@ export const listEquipo = createServerFn({ method: "GET" })
     const profile = await profileFor(context.userId);
     if (!profile) throw new Error("No autorizado");
     const hoy = data || hoyBogota();
-    const rows = await personasDe(hoy, veElEquipo(profile.role) ? undefined : profile.user_id);
+    const ciudad = profile.role === "gerencia" ? (profile.ciudad_vista ?? 0) : (profile.ciudad_id ?? 1);
+    const rows = await personasDe(hoy, veElEquipo(profile.role) ? undefined : profile.user_id, ciudad);
     if (!configura(profile.role)) return rows.map((row) => row.persona);
     const sql = await getSql();
     const claves = await sql.query<{ user_id: string; clave: string }>(`select user_id, clave from claves_equipo`);
@@ -481,9 +483,10 @@ export const agregarAsesor = createServerFn({ method: "POST" })
     const userId = usuarios[0]?.id;
     if (!userId) throw new Error("No pude crear el usuario");
     await sql.query(
-      `insert into profiles (user_id, slug, name, role) values ($1, $2, $3, 'asesor')
-       on conflict (user_id) do update set slug = excluded.slug, name = excluded.name, role = 'asesor'`,
-      [userId, slug, nombre],
+      `insert into profiles (user_id, slug, name, role, ciudad_id)
+       values ($1, $2, $3, 'asesor', coalesce((select ciudad_id from profiles where user_id = $4), 1))
+       on conflict (user_id) do update set slug = excluded.slug, name = excluded.name, role = 'asesor', ciudad_id = excluded.ciudad_id`,
+      [userId, slug, nombre, context.userId],
     );
     await sql.query(
       `insert into equipo_extra (owner_id, activo, empieza, entrada, salida) values ($1, 1, $2, '08:00', '17:00')
@@ -571,9 +574,31 @@ export const cambiarMiClave = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const entradaPermitida = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { profileFor } = await import("./team.server");
+    const profile = await profileFor(context.userId);
+    if (!profile) return { ok: false, motivo: "No encontré tu usuario" };
+    const sql = await getSql();
+    const estado = await sql.query<{ activo: boolean; ciudad_activa: boolean | null }>(
+      `select p.activo, c.activa as ciudad_activa
+       from profiles p
+       left join ciudades c on c.id = p.ciudad_id
+       where p.user_id = $1`,
+      [context.userId],
+    );
+    const fila = estado[0];
+    if (fila && fila.activo === false) return { ok: false, motivo: "Tu usuario está desactivado" };
+    if (fila && fila.ciudad_activa === false) return { ok: false, motivo: "Tu ciudad está en pausa" };
+    return { ok: true, motivo: "" };
+  });
+
 export const resolverUsuario = createServerFn({ method: "POST" })
   .validator((usuario: string) => usuario.trim())
   .handler(async ({ data }) => {
+    const { ensureTeamAccounts } = await import("./team.server");
+    await ensureTeamAccounts();
     const limpio = data
       .trim()
       .toLowerCase()

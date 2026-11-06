@@ -13,6 +13,7 @@ const TEAM: { slug: string; name: string; email: string; password: string; role:
   { slug: "franz", name: "Franz", email: "franz@vinculalibre.app", password: "Franz2026", role: "coordinadora" },
   { slug: "asiyade", name: "Asiyade", email: "asiyade@vinculalibre.app", password: "Asiyade2026", role: "coordinadora" },
   { slug: "pablo", name: "Pablo", email: "pablo@vinculalibre.app", password: "Pablo2026", role: "coordinadora" },
+  { slug: "gerencia", name: "Gerencia Taxis Libres", email: "gerencia@vinculalibre.app", password: "TaxisLibres#Pais2026", role: "gerencia" },
 ];
 
 export type { Role };
@@ -30,7 +31,10 @@ export async function ensureTeamAccounts() {
       insert into profiles (user_id, slug, name, role)
       select id, ${person.slug}, ${person.name}, ${person.role}
       from "user" where email = ${person.email}
-      on conflict (user_id) do update set name = excluded.name, slug = excluded.slug
+      on conflict (user_id) do update set
+        name = excluded.name,
+        slug = excluded.slug,
+        role = case when excluded.role = 'gerencia' then excluded.role else profiles.role end
     `;
     await sql`
       insert into claves_equipo (user_id, clave)
@@ -42,8 +46,8 @@ export async function ensureTeamAccounts() {
 
 export async function profileFor(userId: string) {
   const sql = await getSql();
-  const rows = await sql<{ user_id: string; slug: string; name: string; role: Role }>`
-    select user_id, slug, name, role from profiles where user_id = ${userId}
+  const rows = await sql<{ user_id: string; slug: string; name: string; role: Role; ciudad_id: number | null; ciudad_vista: number | null }>`
+    select user_id, slug, name, role, ciudad_id, ciudad_vista from profiles where user_id = ${userId}
   `;
   return rows[0] ?? null;
 }

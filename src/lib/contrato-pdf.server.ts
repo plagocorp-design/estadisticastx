@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { PLANTILLA } from "./contrato-plantilla";
 import type { DatosFirma } from "./firma.functions";
+import type { CampoContrato } from "@/lib/gerencia";
 
 const tinta = rgb(0.07, 0.13, 0.22);
 
@@ -44,48 +45,77 @@ export async function montarContrato(
   datos: DatosFirma,
   firmas: { nombre: string; png: string }[],
   cuando?: string,
+  plantilla?: { pdf: string; campos: CampoContrato[] },
 ) {
-  const doc = await PDFDocument.load(Buffer.from(PLANTILLA, "base64"));
+  const doc = await PDFDocument.load(Buffer.from(plantilla?.pdf || PLANTILLA, "base64"));
   const font = await doc.embedFont(StandardFonts.Helvetica);
-  const [pagina, firma, datosPersonales] = doc.getPages();
+  const paginas = doc.getPages();
+  const [pagina, firma, datosPersonales] = paginas;
   const fecha = fechaBogota(cuando);
 
-  function texto(page: (typeof pagina), value: string, x: number, y: number, size = 8) {
+  function texto(page: (typeof pagina) | undefined, value: string, x: number, y: number, size = 8) {
     const limpio = seguro(value);
-    if (!limpio) return;
+    if (!limpio || !page) return;
     page.drawText(limpio, { x, y, size, font, color: tinta });
   }
 
   const duenos = duenosDe(datos);
   const nombres = duenos.map((p) => p.nombre).filter(Boolean).join("  /  ");
   const cedulas = duenos.map((p) => p.cc).filter(Boolean).join("  /  ");
-  texto(pagina, nombres, 60, 852, nombres.length > 42 ? 8 : 10);
-  texto(pagina, cedulas, 350, 852, cedulas.length > 24 ? 8 : 10);
-  texto(pagina, datos.direccion, 112, 799, 8);
-  texto(pagina, datos.telefono, 398, 799, 8);
-  texto(pagina, datos.marca, 92, 733, 8);
-  texto(pagina, datos.linea, 262, 733, 7);
-  texto(pagina, datos.clase, 424, 733, 8);
-  texto(pagina, datos.modelo, 98, 715, 8);
-  texto(pagina, datos.motor, 280, 715, 7);
-  texto(pagina, datos.servicio, 470, 715, 8);
-  texto(pagina, datos.serie, 100, 696, 7);
-  texto(pagina, datos.carroceria, 292, 696, 7);
-  texto(pagina, datos.cilindraje, 446, 696, 8);
-  texto(pagina, datos.placa, 92, 678, 9);
+  const valores: Record<string, string> = {
+    nombre: nombres,
+    cc: cedulas,
+    direccion: datos.direccion,
+    telefono: datos.telefono,
+    marca: datos.marca,
+    linea: datos.linea,
+    clase: datos.clase,
+    modelo: datos.modelo,
+    motor: datos.motor,
+    servicio: datos.servicio,
+    serie: datos.serie,
+    carroceria: datos.carroceria,
+    cilindraje: datos.cilindraje,
+    placa: datos.placa,
+    correo: datos.correo,
+    dia: fecha.dia,
+    mes: fecha.mes,
+    ano: fecha.ano,
+  };
 
-  texto(firma, datos.correo, 126, 376, 8);
-  texto(firma, fecha.dia, 110, 346, 8);
-  texto(firma, fecha.mes, 193, 346, 8);
-  texto(firma, fecha.ano, 281, 346, 8);
+  if (plantilla?.campos.length) {
+    for (const campo of plantilla.campos) {
+      if (campo.campo === "firma") continue;
+      texto(paginas[campo.pagina], valores[campo.campo] ?? "", campo.x, campo.y, campo.size);
+    }
+  } else {
+    texto(pagina, nombres, 60, 852, nombres.length > 42 ? 8 : 10);
+    texto(pagina, cedulas, 350, 852, cedulas.length > 24 ? 8 : 10);
+    texto(pagina, datos.direccion, 112, 799, 8);
+    texto(pagina, datos.telefono, 398, 799, 8);
+    texto(pagina, datos.marca, 92, 733, 8);
+    texto(pagina, datos.linea, 262, 733, 7);
+    texto(pagina, datos.clase, 424, 733, 8);
+    texto(pagina, datos.modelo, 98, 715, 8);
+    texto(pagina, datos.motor, 280, 715, 7);
+    texto(pagina, datos.servicio, 470, 715, 8);
+    texto(pagina, datos.serie, 100, 696, 7);
+    texto(pagina, datos.carroceria, 292, 696, 7);
+    texto(pagina, datos.cilindraje, 446, 696, 8);
+    texto(pagina, datos.placa, 92, 678, 9);
+    texto(firma, datos.correo, 126, 376, 8);
+    texto(firma, fecha.dia, 110, 346, 8);
+    texto(firma, fecha.mes, 193, 346, 8);
+    texto(firma, fecha.ano, 281, 346, 8);
+    texto(datosPersonales, fecha.dia, 209, 510, 10);
+    texto(datosPersonales, fecha.mes, 313, 510, 10);
+    texto(datosPersonales, fecha.ano, 423, 510, 10);
+    texto(datosPersonales, datos.telefono, 102, 471, 10);
+    texto(datosPersonales, datos.direccion, 108, 446, 9);
+  }
 
-  texto(datosPersonales, fecha.dia, 209, 510, 10);
-  texto(datosPersonales, fecha.mes, 313, 510, 10);
-  texto(datosPersonales, fecha.ano, 423, 510, 10);
-  texto(datosPersonales, datos.telefono, 102, 471, 10);
-  texto(datosPersonales, datos.direccion, 108, 446, 9);
-
-  const huecos = huecosFirma(Math.max(firmas.length, 1), 300, 36);
+  const sitioFirma = plantilla?.campos.find((campo) => campo.campo === "firma");
+  const huecos = huecosFirma(Math.max(firmas.length, 1), sitioFirma?.y ?? 300, 36);
   const huecosDatos = huecosFirma(Math.max(firmas.length, 1), 360, 48);
   for (const [indice, firmaHecha] of firmas.entries()) {
     const base = firmaHecha.png.replace(/^data:image\/png;base64,/, "");
@@ -93,10 +123,13 @@ export async function montarContrato(
     const imagen = await doc.embedPng(Buffer.from(base, "base64"));
     const sitio = huecos[indice] ?? huecos[huecos.length - 1];
     const sitioDatos = huecosDatos[indice] ?? huecosDatos[huecosDatos.length - 1];
-    firma.drawImage(imagen, { x: 330, y: sitio.y, width: 170, height: sitio.h });
-    texto(firma, firmaHecha.nombre, 330, sitio.y - 10, 7);
-    datosPersonales.drawImage(imagen, { x: 60, y: sitioDatos.y, width: 180, height: sitioDatos.h });
-    texto(datosPersonales, firmaHecha.nombre, 60, sitioDatos.y - 10, 8);
+    const paginaFirma = paginas[sitioFirma?.pagina ?? 1] ?? firma;
+    paginaFirma?.drawImage(imagen, { x: sitioFirma?.x ?? 330, y: sitio.y, width: 170, height: sitio.h });
+    texto(paginaFirma, firmaHecha.nombre, sitioFirma?.x ?? 330, sitio.y - 10, 7);
+    if (!plantilla?.campos.length) {
+      datosPersonales?.drawImage(imagen, { x: 60, y: sitioDatos.y, width: 180, height: sitioDatos.h });
+      texto(datosPersonales, firmaHecha.nombre, 60, sitioDatos.y - 10, 8);
+    }
   }
 
   return Buffer.from(await doc.save()).toString("base64");

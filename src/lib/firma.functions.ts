@@ -183,7 +183,8 @@ export const enviarPortal = createServerFn({ method: "POST" })
       try {
         const { montarContrato } = await import("./contrato-pdf.server");
         const { pedirFirmaDocuseal } = await import("./docuseal.server");
-        const pdf = await montarContrato(datos, []);
+        const { plantillaDeCaso } = await import("./gerencia.functions");
+        const pdf = await montarContrato(datos, [], undefined, await plantillaDeCaso(data.casoId));
         const roles = partes.map((parte, indice) => ({
           role: indice === 0 ? "Propietario" : `Propietario ${indice + 1}`,
           email: parte.correo,
@@ -381,8 +382,11 @@ export const verPortal = createServerFn({ method: "GET" })
     );
     const { montarContrato } = await import("./contrato-pdf.server");
     const { montarCarta, juntarPdfs } = await import("./carta-pdf.server");
+    const { plantillaDeCaso } = await import("./gerencia.functions");
     const hechas = firmas.map((firma) => ({ nombre: firma.nombre, png: firma.firma }));
-    const pdf = await juntarPdfs([await montarContrato(datos, hechas), await montarCarta(datos, hechas)]);
+    const casoSobre = await sql.query<{ caso_id: number }>(`select caso_id from sobres where id = $1`, [yo.sobre_id]);
+    const plantilla = casoSobre[0] ? await plantillaDeCaso(casoSobre[0].caso_id) : undefined;
+    const pdf = await juntarPdfs([await montarContrato(datos, hechas, undefined, plantilla), await montarCarta(datos, hechas)]);
     return {
       datos,
       nombre: yo.nombre,
@@ -426,9 +430,10 @@ export const firmarPortal = createServerFn({ method: "POST" })
       );
       const { montarContrato } = await import("./contrato-pdf.server");
       const { montarCarta } = await import("./carta-pdf.server");
+      const { plantillaDeCaso } = await import("./gerencia.functions");
       const datos = JSON.parse(paquete[0]?.datos ?? "{}") as DatosFirma;
       const hechas = firmas.map((firma) => ({ nombre: firma.nombre, png: firma.firma }));
-      const pdf = await montarContrato(datos, hechas);
+      const pdf = await montarContrato(datos, hechas, undefined, await plantillaDeCaso(yo.caso_id));
       const carta = await montarCarta(datos, hechas);
       await sql.query(
         `update casos set firma_contrato = true, firma_carta = true, contrato_pdf = $1, contrato_nombre = $2, updated_at = now() where id = $3`,

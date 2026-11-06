@@ -91,9 +91,10 @@ export const listAgenda = createServerFn({ method: "GET" })
     const profile = await profileFor(context.userId);
     if (!profile) return [];
     const sql = await getSql();
+    const ciudad = profile.role === "gerencia" ? (profile.ciudad_vista ?? 0) : (profile.ciudad_id ?? 1);
     const rows =
       veElEquipo(profile.role)
-        ? await sql.query<AgendaRow>(`${SELECT} order by a.fecha asc, a.hora asc, a.id asc`)
+        ? await sql.query<AgendaRow>(`${SELECT} where coalesce(p.ciudad_id, 1) = $1 order by a.fecha asc, a.hora asc, a.id asc`, [ciudad])
         : await sql.query<AgendaRow>(`${SELECT} where a.owner_id = $1 order by a.fecha asc, a.hora asc, a.id asc`, [
             context.userId,
           ]);

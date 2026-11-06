@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { authClient } from "@/lib/auth/client";
 import { prepareTeam } from "@/lib/casos.functions";
-import { resolverUsuario } from "@/lib/control.functions";
+import { entradaPermitida, resolverUsuario } from "@/lib/control.functions";
 
 export const Route = createFileRoute("/login")({ component: Login });
 
@@ -38,6 +38,14 @@ function Login() {
       }
       const token = (result.data as { token?: string }).token;
       if (token) sessionStorage.setItem("grok-auth.bearer-token", token);
+      const permiso = await entradaPermitida().catch(() => ({ ok: true, motivo: "" }));
+      if (!permiso.ok) {
+        await authClient.signOut();
+        sessionStorage.removeItem("grok-auth.bearer-token");
+        setError(permiso.motivo || "Tu usuario no puede entrar");
+        setBusy(false);
+        return;
+      }
       const next = new URLSearchParams(window.location.search).get("next");
       await navigate({ to: next === "/piloto" ? "/piloto" : "/" });
     } catch {

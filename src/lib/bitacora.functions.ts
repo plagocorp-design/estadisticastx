@@ -33,6 +33,7 @@ export const listBitacoras = createServerFn({ method: "GET" })
     const profile = await profileFor(context.userId);
     if (!profile) return [];
     const sql = await getSql();
+    const ciudad = profile.role === "gerencia" ? (profile.ciudad_vista ?? 0) : (profile.ciudad_id ?? 1);
     const equipo = veElEquipo(profile.role);
     const rows = await sql.query<{
       owner_id: string;
@@ -55,9 +56,9 @@ export const listBitacoras = createServerFn({ method: "GET" })
               b.llamadas, b.visitas, b.dijo_si, b.polizas, b.que_hizo, b.detalle_call, b.detalle_calle, b.trabas, b.manana
        from bitacoras b
        join profiles p on p.user_id = b.owner_id
-       where b.fecha = $1 and ($2::boolean or b.owner_id = $3)
+       where b.fecha = $1 and ($2::boolean or b.owner_id = $3) and coalesce(p.ciudad_id, 1) = $4
        order by p.name`,
-      [fecha, equipo, context.userId],
+      [fecha, equipo, context.userId, ciudad],
     );
     return rows.map((row) => ({
       ownerId: row.owner_id,

@@ -1,7 +1,11 @@
 export const DOCS_PILOTO = [
   { id: "unificado", label: "Paquete completo" },
   { id: "cedula", label: "Cédula" },
+  { id: "cedula_frente", label: "Cédula, frente" },
+  { id: "cedula_reverso", label: "Cédula, reverso" },
   { id: "tarjeta_propiedad", label: "Tarjeta de propiedad" },
+  { id: "tarjeta_propiedad_frente", label: "Tarjeta de propiedad, frente" },
+  { id: "tarjeta_propiedad_reverso", label: "Tarjeta de propiedad, reverso" },
   { id: "tarjeta_operacion", label: "Tarjeta de operación" },
   { id: "soat", label: "SOAT" },
   { id: "tecnomecanica", label: "Tecnomecánica" },
@@ -72,6 +76,16 @@ export type ViaEstado = "" | "pedido" | "enlace" | "comprobante" | "recibido" | 
 export type OpTarjeta = "" | "pagada" | "bus" | "movilidad" | "radicada" | "expedida" | "entregada";
 
 const DOC_IDS = new Set<string>(DOCS_PILOTO.map((d) => d.id));
+
+export function tipoVisible(tipo: string) {
+  if (tipo === "cedula_frente" || tipo === "cedula_reverso") return "cedula";
+  if (tipo === "tarjeta_propiedad_frente" || tipo === "tarjeta_propiedad_reverso") return "tarjeta_propiedad";
+  return tipo;
+}
+
+export function copiasAlImprimir(tipo: string) {
+  return tipoVisible(tipo) === "tarjeta_propiedad" || tipo === "tarjeta_operacion" ? 2 : 1;
+}
 
 export function docsDe(value: unknown) {
   return String(value ?? "")

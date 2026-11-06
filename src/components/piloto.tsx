@@ -13,6 +13,7 @@ import {
   etiquetaVia,
   marcasDe,
 } from "@/lib/piloto";
+import { configMia } from "@/lib/gerencia.functions";
 import type { LecturaDoc } from "@/lib/ocr";
 import {
   bajarPaquete,
@@ -315,8 +316,21 @@ export function BloquePiloto({
   const [ocupado, setOcupado] = useState(false);
   const [vista, setVista] = useState<{ id: number; nombre: string; archivo: string } | null>(null);
   const [lectura, setLectura] = useState<LecturaDoc | null>(null);
+  const [etiquetas, setEtiquetas] = useState<Record<string, string>>({});
+  const [textoOperativa, setTextoOperativa] = useState("Enviar a operativa");
+  const [textoPago, setTextoPago] = useState("");
   const tiposSubida = (soloTipos ?? DOCS_PILOTO.map((doc) => doc.id)).filter((id) => id !== "unificado");
-  const docsVisibles = soloTipos ? docs.filter((doc) => soloTipos.includes(doc.tipo)) : docs;
+  const admiteExtra = !soloTipos || soloTipos.includes("cedula");
+  const opciones = [
+    ...DOCS_PILOTO.filter((doc) => doc.id !== "unificado" && tiposSubida.includes(doc.id)).map((doc) => ({
+      id: doc.id,
+      label: etiquetas[doc.id] || doc.label,
+    })),
+    ...Object.entries(etiquetas)
+      .filter(([id]) => admiteExtra && !DOCS_PILOTO.some((doc) => doc.id === id))
+      .map(([id, label]) => ({ id, label })),
+  ];
+  const docsVisibles = soloTipos ? docs.filter((doc) => soloTipos.includes(doc.tipo) || (admiteExtra && Boolean(etiquetas[doc.tipo]) && !DOCS_PILOTO.some((item) => item.id === doc.tipo))) : docs;
   const lider = configura(rol);
   const asesor = llevaProcesos(rol);
   const sube = lider || (asesor && !esBandeja(rol));
@@ -331,6 +345,18 @@ export function BloquePiloto({
     if (!activo && !soloDocs) return;
     cargar().catch((err) => onError(fallo(err)));
   }, [caso.id, activo, soloDocs]);
+
+  useEffect(() => {
+    configMia()
+      .then((conf) => {
+        const mapa: Record<string, string> = {};
+        for (const doc of conf.documentos) if (doc.activo) mapa[doc.id] = doc.label;
+        setEtiquetas(mapa);
+        if (conf.textos.enviar_operativa) setTextoOperativa(conf.textos.enviar_operativa);
+        if (conf.textos.whatsapp_pago) setTextoPago(conf.textos.whatsapp_pago);
+      })
+      .catch(() => {});
+  }, [caso.id]);
 
   useEffect(() => {
     setMarcas(marcasDe(caso.areaMarcas));
@@ -582,7 +608,7 @@ export function BloquePiloto({
               <div className="flex flex-wrap gap-2">
                 {modo === "uno" ? (
                   <select value={tipo === "unificado" ? "cedula" : tipo} onChange={(e) => setTipo(e.target.value)} className="h-11 rounded-2xl border border-line bg-card px-3 text-sm">
-                    {DOCS_PILOTO.filter((doc) => doc.id !== "unificado" && tiposSubida.includes(doc.id)).map((doc) => (
+                    {opciones.map((doc) => (
                       <option key={doc.id} value={doc.id}>{doc.label}</option>
                     ))}
                   </select>
@@ -694,15 +720,15 @@ export function BloquePiloto({
                   <label className="text-ink-soft">
                     <input
                       type="checkbox"
-                      checked={ocultos.has(doc.tipo)}
+                      checked={!ocultos.has(doc.tipo)}
                       onChange={(e) =>
                         void correr(async () => {
-                          const listo = await ocultarDocumento({ data: { casoId: caso.id, tipo: doc.tipo, oculto: e.target.checked } });
+                          const listo = await ocultarDocumento({ data: { casoId: caso.id, tipo: doc.tipo, oculto: !e.target.checked } });
                           onCaso({ docsOcultos: listo.ocultos });
                         })
                       }
                     />{" "}
-                    Operativa no lo ve
+                    Operativa lo ve
                   </label>
                 ) : null}
               </li>
@@ -744,6 +770,29 @@ export function BloquePiloto({
         </div>
       ) : null}
 
+      {soloDocs && soloTipos?.includes("cedula") && (asesor || lider) && !esBandeja(rol) ? (
+        caso.mano === "operativa" || caso.mano === "servicio" ? (
+          <p className="text-sm text-ink-soft">Ya se envió a operativa.</p>
+        ) : (
+          <div className="grid gap-1">
+            <button
+              type="button"
+              disabled={ocupado}
+              onClick={() =>
+                void correr(async () => {
+                  await pasarMano({ data: { id: caso.id, mano: "operativa" } });
+                  onCaso({ mano: "operativa", manoAsignado: "", operativa: true, docsOcultos: "" });
+                })
+              }
+              className="h-11 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper disabled:opacity-60"
+            >
+              {textoOperativa}
+            </button>
+            <p className="text-xs text-ink-soft">Operativa ve el proceso y los documentos en ese momento. No espera el pago.</p>
+          </div>
+        )
+      ) : null}
+
       {!soloDocs ? (
       <>
       {(asesor || lider) && !esBandeja(rol) ? (
@@ -758,8 +807,8 @@ export function BloquePiloto({
               </button>
             </>
           ) : null}
-          {(caso.mano === "" || caso.mano === "via") && (caso.polizasSubidas || caso.viaEstado === "recibido") ? (
-            <button type="button" disabled={ocupado} onClick={() => void correr(async () => { await pasarMano({ data: { id: caso.id, mano: "operativa" } }); onCaso({ mano: "operativa", manoAsignado: "", operativa: true, viaSeguros: true }); })} className="h-11 rounded-2xl border border-line bg-card px-4 text-sm font-semibold disabled:opacity-60">
+          {(caso.mano === "" || caso.mano === "via") ? (
+            <button type="button" disabled={ocupado} onClick={() => void correr(async () => { await pasarMano({ data: { id: caso.id, mano: "operativa" } }); onCaso({ mano: "operativa", manoAsignado: "", operativa: true, docsOcultos: "" }); })} className="h-11 rounded-2xl border border-line bg-card px-4 text-sm font-semibold disabled:opacity-60">
               Pasar a operativa
             </button>
           ) : null}
@@ -790,7 +839,7 @@ export function BloquePiloto({
           {caso.telefono ? (
             <a
               className="ml-2 text-sm font-semibold text-navy"
-              href={whatsApp(caso.telefono, `Hola. Le comparto el enlace para el pago de la póliza: ${caso.viaEnlace}`)}
+              href={whatsApp(caso.telefono, `${textoPago || "Hola. Le comparto el enlace para el pago de la póliza."} ${caso.viaEnlace}`)}
               target="_blank"
               rel="noreferrer"
             >
