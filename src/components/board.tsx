@@ -1493,6 +1493,7 @@ function Panel({
   pdfRef.current = { pdf: pdfNuevo, nombre: nombrePdf };
   const vivo = form ? conAvance(form) : null;
   const [pasosCfg, setPasosCfg] = useState<Record<string, { label: string; activo: boolean }>>({});
+  const [docsCfg, setDocsCfg] = useState<{ id: string; activo: boolean; parte?: string }[]>([]);
   const [extras, setExtras] = useState<{ key: string; label: string }[]>([]);
   const [marcasExtra, setMarcasExtra] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -1501,7 +1502,8 @@ function Panel({
         const mapa: Record<string, { label: string; activo: boolean }> = {};
         for (const paso of conf.pasos) mapa[paso.key] = { label: paso.label, activo: paso.activo };
         setPasosCfg(mapa);
-        setExtras(conf.pasos.filter((paso) => paso.activo && !STEPS.some((item) => item.key === paso.key)));
+        setDocsCfg(conf.documentos);
+        setExtras(conf.pasos.filter((paso) => paso.activo && !STEPS.some((item) => item.key === paso.key) && !["Operativa", "Vía Seguros", "Servicio"].includes(paso.grupo)));
       })
       .catch(() => {});
   }, []);
@@ -1513,9 +1515,7 @@ function Panel({
     () =>
       GRUPOS.map((g) => ({
         g,
-        steps: STEPS.filter(
-          (s) => s.group === g && !["soat", "tecnomecanica", "formulario", "documentos", "completado"].includes(s.key),
-        )
+        steps: STEPS.filter((s) => s.group === g && !["documentos", "completado"].includes(s.key))
           .filter((s) => pasosCfg[s.key]?.activo !== false || Boolean(form?.[s.key]))
           .map((s) => ({ ...s, label: pasosCfg[s.key]?.label || s.label })),
       })),
@@ -1959,6 +1959,23 @@ function Panel({
   }
 
   const tel = form ? celular(form.telefono) : "";
+  function tiposParte(parte: string) {
+    if (!docsCfg.length) {
+      return parte === "Documentos"
+        ? ["unificado", "cedula", "cedula_frente", "cedula_reverso", "tarjeta_propiedad", "tarjeta_propiedad_frente", "tarjeta_propiedad_reverso", "tarjeta_operacion"]
+        : parte === "Firma"
+          ? ["contrato", "carta", "autorizacion"]
+          : parte === "Póliza"
+            ? ["poliza", "comprobante"]
+            : [];
+    }
+    const base = docsCfg.filter((doc) => doc.activo && (doc.parte || "Documentos") === parte).map((doc) => doc.id);
+    const extra: string[] = [];
+    if (parte === "Documentos" && base.length) extra.push("unificado");
+    if (base.includes("cedula")) extra.push("cedula_frente", "cedula_reverso");
+    if (base.includes("tarjeta_propiedad")) extra.push("tarjeta_propiedad_frente", "tarjeta_propiedad_reverso");
+    return [...new Set([...base, ...extra])];
+  }
 
   return (
     <div className="fixed inset-0 z-30 flex justify-end bg-ink/40" onClick={() => void cerrar()}>
@@ -1996,10 +2013,13 @@ function Panel({
           {!caso ? (
             <form id="nuevo" onSubmit={create} className="grid gap-3">
               <div className="grid gap-2 rounded-2xl border border-line bg-paper p-3">
-                <p className="text-sm font-semibold">Abre el seguimiento con dos fotos</p>
-                <p className="text-sm text-ink-soft">Cédula y tarjeta de propiedad. El resto de documentos se sube después. El celular no sale en la foto: escríbelo para poder pedir el enlace de pago.</p>
-                <FotoApertura etiqueta="Cédula" lista={fotosApertura.some((foto) => foto.tipo === "cedula")} leyendo={leyendoFoto === "cedula"} onFile={(file) => void leerApertura("cedula", file)} />
-                <FotoApertura etiqueta="Tarjeta de propiedad" lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad")} leyendo={leyendoFoto === "tarjeta_propiedad"} onFile={(file) => void leerApertura("tarjeta_propiedad", file)} />
+                <p className="text-sm font-semibold">Abre el seguimiento con las fotos</p>
+                <p className="text-sm text-ink-soft">Cédula por las dos caras, tarjeta de propiedad por las dos caras y tarjeta de operación. Esas fotos quedan guardadas en los documentos. El celular no sale en la foto: escríbelo tú.</p>
+                <FotoApertura etiqueta="Cédula, frente" lista={fotosApertura.some((foto) => foto.tipo === "cedula_frente")} leyendo={leyendoFoto === "cedula_frente"} onFile={(file) => void leerApertura("cedula_frente", file)} />
+                <FotoApertura etiqueta="Cédula, reverso" lista={fotosApertura.some((foto) => foto.tipo === "cedula_reverso")} leyendo={leyendoFoto === "cedula_reverso"} onFile={(file) => void leerApertura("cedula_reverso", file)} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, frente" lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_frente")} leyendo={leyendoFoto === "tarjeta_propiedad_frente"} onFile={(file) => void leerApertura("tarjeta_propiedad_frente", file)} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, reverso" lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_reverso")} leyendo={leyendoFoto === "tarjeta_propiedad_reverso"} onFile={(file) => void leerApertura("tarjeta_propiedad_reverso", file)} />
+                <FotoApertura etiqueta="Tarjeta de operación" lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion"} onFile={(file) => void leerApertura("tarjeta_operacion", file)} />
               </div>
               {choques.map((campo) => (
                 <div key={campo.key} className="grid gap-1 rounded-2xl border border-line p-3 text-sm">
@@ -2080,7 +2100,7 @@ function Panel({
                 miSlug={miSlug}
                 activo
                 soloDocs
-                soloTipos={["unificado", "cedula", "cedula_frente", "cedula_reverso", "tarjeta_propiedad", "tarjeta_propiedad_frente", "tarjeta_propiedad_reverso", "tarjeta_operacion", "contrato"]}
+                soloTipos={tiposParte("Documentos")}
                 onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))}
                 onListo={() => {
                   onChat();
@@ -2088,6 +2108,12 @@ function Panel({
                 }}
                 onError={onError}
               />
+              ) : null}
+              {pestana === "firma" && tiposParte("Firma").length ? (
+                <BloquePiloto caso={form} rol={rol} miSlug={miSlug} activo soloDocs soloTipos={tiposParte("Firma")} onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} onListo={() => { onChat(); void onSaved(); }} onError={onError} />
+              ) : null}
+              {pestana === "poliza" && tiposParte("Póliza").length ? (
+                <BloquePiloto caso={form} rol={rol} miSlug={miSlug} activo soloDocs soloTipos={tiposParte("Póliza")} onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} onListo={() => { onChat(); void onSaved(); }} onError={onError} />
               ) : null}
               {pestana === "inicio" || pestana === "firma" ? (
               <div className="grid content-start gap-3">
@@ -2733,7 +2759,7 @@ function FotoApertura({
   );
 }
 
-type FotoApertura = { tipo: "cedula" | "tarjeta_propiedad"; nombre: string; archivo: string; lectura: string };
+type FotoApertura = { tipo: "cedula_frente" | "cedula_reverso" | "tarjeta_propiedad_frente" | "tarjeta_propiedad_reverso" | "tarjeta_operacion"; nombre: string; archivo: string; lectura: string };
 
 function borradorVacio(): CasoDraft {
   return {

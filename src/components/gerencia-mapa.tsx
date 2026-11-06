@@ -31,7 +31,7 @@ export function MapaPais({
   const sueltas = ciudades.filter((ciudad) => !sitioDe(ciudad.nombre));
   return (
     <div>
-      <svg viewBox="0 0 280 400" className="mx-auto h-[28rem] w-full max-w-sm" role="img" aria-label="Mapa de Colombia">
+      <svg viewBox="0 0 280 400" className="mx-auto h-80 w-full max-w-md" role="img" aria-label="Mapa de Colombia">
         <path d={TRAZO} className="fill-navy/10 stroke-navy" strokeWidth="2" />
         {ciudades.map((ciudad) => {
           const sitio = sitioDe(ciudad.nombre);

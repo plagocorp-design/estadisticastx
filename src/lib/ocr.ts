@@ -87,6 +87,9 @@ function numeroCc(crudo: string) {
 }
 
 function ccDe(texto: string) {
+  const nuip = texto.match(/\bNUIP\b[^\d]{0,12}(\d{1,3}(?:\.\d{3}){1,3}|\d{6,11})/i);
+  const deNuip = numeroCc(nuip?.[1] ?? "");
+  if (deNuip) return deNuip;
   const punteado = texto.match(/\b(\d{1,3}(?:\.\d{3}){1,3})\b/);
   const dePuntos = numeroCc(punteado?.[1] ?? "");
   if (dePuntos) return dePuntos;
@@ -129,7 +132,7 @@ function valorDe(texto: string, etiqueta: RegExp, max = 60) {
 function nombreDe(texto: string) {
   const apellidos = valorDe(texto, /\bapellidos?\b/i, 40).replace(/\b(c\.?c\.?|cedula|placa|marca).*/i, "").trim();
   const nombres = valorDe(texto, /\bnombres?\b/i, 40).replace(/\b(c\.?c\.?|cedula|placa|marca).*/i, "").trim();
-  const junto = [nombres, apellidos].filter((parte) => parte.length >= 3 && !/republica|colombia|ciudadania|transito/i.test(parte)).join(" ");
+  const junto = [apellidos, nombres].filter((parte) => parte.length >= 3 && !/republica|colombia|ciudadania|transito/i.test(parte)).join(" ");
   if (junto.length >= 5) return junto.toUpperCase();
   const directo = valorDe(texto, /(?:propietario|a nombre de)\b/i, 80);
   if (directo.length >= 5 && /[A-Za-zÁÉÍÓÚÑ]/.test(directo)) return directo.toUpperCase();
@@ -137,7 +140,7 @@ function nombreDe(texto: string) {
 }
 
 function empresaDe(texto: string) {
-  const hallada = valorDe(texto, /empresa(?:\s+de\s+transporte|\s+afiliadora)?\b/i, 80);
+  const hallada = valorDe(texto, /(?:raz[oó]n social|empresa(?:\s+de\s+transporte|\s+afiliadora)?)\b/i, 80);
   if (hallada.length < 3) return "";
   return hallada.replace(/\b(nit|placa|n[uú]mero).*/i, "").trim().toUpperCase();
 }
@@ -158,6 +161,7 @@ export function analizarTexto(
   actual: Partial<Record<CampoLeido["key"], string>>,
 ): LecturaDoc {
   const base = texto.replace(/\r/g, "").replace(/[ \t]+/g, " ").trim();
+  const clase = tipo.startsWith("cedula") ? "cedula" : tipo.startsWith("tarjeta_propiedad") ? "tarjeta_propiedad" : tipo;
   if (base.length < 12) {
     return {
       vigencia: "sin_fecha",
@@ -183,7 +187,7 @@ export function analizarTexto(
     .filter((key) => leido[key])
     .filter((key) => !igual(actual[key] ?? "", leido[key] ?? ""))
     .map((key) => ({ key, label: ETIQUETAS[key], actual: actual[key] ?? "", leido: leido[key] ?? "" }));
-  const vence = venceDe(base, tipo);
+  const vence = venceDe(base, clase);
   const hoy = hoyBogota();
   const vigencia = !vence ? "sin_fecha" : vence >= hoy ? "vigente" : "vencido";
   const aviso =

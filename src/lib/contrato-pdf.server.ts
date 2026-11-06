@@ -90,6 +90,7 @@ export async function montarContrato(
     dia: fecha.dia,
     mes: fecha.mes,
     ano: fecha.ano,
+    capacidad: "",
   };
 
   if (plantilla?.campos.length) {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CampoContrato } from "@/lib/gerencia";
+import { DATOS_CONTRATO } from "@/lib/gerencia";
 
 const FUENTES = [
   ["helvetica", "Helvetica"],
@@ -23,7 +24,7 @@ export function EditorContrato({
   const [alto, setAlto] = useState(842);
   const [escala, setEscala] = useState(1);
   const [error, setError] = useState("");
-  const [activo, setActivo] = useState(campos[0]?.campo ?? "");
+  const [activo, setActivo] = useState(campos[0]?.id || campos[0]?.campo || "");
 
   useEffect(() => {
     let cancelado = false;
@@ -62,7 +63,9 @@ export function EditorContrato({
     setPagina(paginaCampo);
   }
 
-  const elegido = campos.find((campo) => campo.campo === activo);
+  const [nuevo, setNuevo] = useState("placa");
+  const elegido = campos.find((campo) => (campo.id || campo.campo) === activo);
+  const clave = (campo: CampoContrato, index: number) => campo.id || `${campo.campo}-${index}`;
 
   return (
     <div className="grid gap-3 lg:grid-cols-[16rem_minmax(0,1fr)]">
@@ -77,22 +80,56 @@ export function EditorContrato({
           </button>
           <span className="self-center text-xs text-ink-soft">Página {pagina + 1} de {paginas}</span>
         </div>
-        {campos.map((campo) => (
+        {campos.map((campo, index) => {
+          const id = clave(campo, index);
+          const dato = DATOS_CONTRATO.find((item) => item.campo === campo.campo);
+          return (
           <button
-            key={campo.campo}
+            key={id}
             type="button"
-            onClick={() => elegir(campo.campo, campo.pagina)}
-            className={"h-10 rounded-xl border px-3 text-left text-sm font-semibold " + (activo === campo.campo ? "border-navy bg-navy text-paper" : "border-line")}
+            onClick={() => elegir(id, campo.pagina)}
+            className={"rounded-xl border px-3 py-2 text-left text-sm " + (activo === id ? "border-navy bg-navy text-paper" : "border-line")}
           >
-            {campo.campo}
+            <span className="block font-semibold">{dato?.label || campo.campo}</span>
+            <span className="block text-xs opacity-80">Viene de {dato?.viene || "el proceso"}</span>
           </button>
-        ))}
+          );
+        })}
+        {elegido ? (
+          <button
+            type="button"
+            className="h-10 rounded-xl border border-line px-3 text-sm font-semibold"
+            onClick={() => {
+              const id = crypto.randomUUID();
+              onChange([...campos, { ...elegido, id, x: elegido.x + 16, y: Math.max(40, elegido.y - 18) }]);
+              setActivo(id);
+            }}
+          >
+            Poner otra vez
+          </button>
+        ) : null}
+        <div className="flex gap-2">
+          <select value={nuevo} onChange={(event) => setNuevo(event.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border border-line px-2 text-sm">
+            {DATOS_CONTRATO.map((dato) => <option key={dato.campo} value={dato.campo}>{dato.label}</option>)}
+          </select>
+          <button
+            type="button"
+            className="h-10 rounded-xl border border-line px-3 text-sm font-semibold"
+            onClick={() => {
+              const id = crypto.randomUUID();
+              onChange([...campos, { id, campo: nuevo, pagina, x: 80, y: 700, size: 8 }]);
+              setActivo(id);
+            }}
+          >
+            Agregar
+          </button>
+        </div>
         {elegido ? (
           <label className="grid gap-1 text-sm">
             Tipografía
             <select
               value={elegido.fuente || "helvetica"}
-              onChange={(event) => onChange(campos.map((item) => (item.campo === elegido.campo ? { ...item, fuente: event.target.value } : item)))}
+              onChange={(event) => onChange(campos.map((item) => ((item.id || item.campo) === (elegido.id || elegido.campo) ? { ...item, fuente: event.target.value } : item)))}
               className="h-10 rounded-xl border border-line px-2"
             >
               {FUENTES.map(([id, label]) => (
@@ -109,7 +146,7 @@ export function EditorContrato({
               min={6}
               max={16}
               value={elegido.size}
-              onChange={(event) => onChange(campos.map((item) => (item.campo === elegido.campo ? { ...item, size: Number(event.target.value) } : item)))}
+              onChange={(event) => onChange(campos.map((item) => ((item.id || item.campo) === (elegido.id || elegido.campo) ? { ...item, size: Number(event.target.value) } : item)))}
             />
           </label>
         ) : null}
@@ -121,20 +158,22 @@ export function EditorContrato({
           {campos
             .filter((campo) => campo.pagina === pagina)
             .map((campo) => {
+              const id = campo.id || campo.campo;
               const altoCaja = campo.size * 1.7;
+              const dato = DATOS_CONTRATO.find((item) => item.campo === campo.campo);
               return (
                 <button
-                  key={campo.campo}
+                  key={id}
                   type="button"
                   onPointerDown={(event) => {
-                    setActivo(campo.campo);
+                    setActivo(id);
                     const origen = { x: event.clientX, y: event.clientY, pdfX: campo.x, pdfY: campo.y };
                     const moverPuntero = (move: PointerEvent) => {
                       const dx = (move.clientX - origen.x) / escala;
                       const dy = (move.clientY - origen.y) / escala;
                       onChange(
                         campos.map((item) =>
-                          item.campo === campo.campo ? { ...item, x: Math.round(origen.pdfX + dx), y: Math.round(origen.pdfY - dy), pagina } : item,
+                          (item.id || item.campo) === id ? { ...item, x: Math.round(origen.pdfX + dx), y: Math.round(origen.pdfY - dy), pagina } : item,
                         ),
                       );
                     };
@@ -147,7 +186,7 @@ export function EditorContrato({
                   }}
                   className={
                     "absolute cursor-move rounded-md border border-navy bg-lime/70 px-1 text-left text-[10px] font-semibold leading-none text-navy " +
-                    (activo === campo.campo ? "ring-2 ring-navy" : "")
+                    (activo === id ? "ring-2 ring-navy" : "")
                   }
                   style={{
                     left: campo.x * escala,
@@ -156,7 +195,7 @@ export function EditorContrato({
                     height: altoCaja * escala,
                   }}
                 >
-                  {campo.campo}
+                  {dato?.label || campo.campo}
                 </button>
               );
             })}

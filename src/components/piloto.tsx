@@ -317,6 +317,7 @@ export function BloquePiloto({
   const [vista, setVista] = useState<{ id: number; nombre: string; archivo: string } | null>(null);
   const [lectura, setLectura] = useState<LecturaDoc | null>(null);
   const [etiquetas, setEtiquetas] = useState<Record<string, string>>({});
+  const [pasosOn, setPasosOn] = useState<Record<string, boolean>>({});
   const [textoOperativa, setTextoOperativa] = useState("Enviar a operativa");
   const [textoPago, setTextoPago] = useState("");
   const tiposSubida = (soloTipos ?? DOCS_PILOTO.map((doc) => doc.id)).filter((id) => id !== "unificado");
@@ -350,8 +351,11 @@ export function BloquePiloto({
     configMia()
       .then((conf) => {
         const mapa: Record<string, string> = {};
+        const pasos: Record<string, boolean> = {};
         for (const doc of conf.documentos) if (doc.activo) mapa[doc.id] = doc.label;
+        for (const paso of conf.pasos) pasos[paso.key] = paso.activo;
         setEtiquetas(mapa);
+        setPasosOn(pasos);
         if (conf.textos.enviar_operativa) setTextoOperativa(conf.textos.enviar_operativa);
         if (conf.textos.whatsapp_pago) setTextoPago(conf.textos.whatsapp_pago);
       })
@@ -863,7 +867,7 @@ export function BloquePiloto({
           <p className="text-sm font-semibold">
             {caso.viaAtencion === "presencial" ? "Atención presencial. El pago se recibe en cajas." : "Atención virtual."}
           </p>
-          <Marcas items={MARCAS_VIA} activas={marcas} atencion={caso.viaAtencion} disabled={ocupado || !esVia} onToggle={tocar} />
+          <Marcas items={MARCAS_VIA.filter((item) => pasosOn[item.id] !== false)} activas={marcas} atencion={caso.viaAtencion} disabled={ocupado || !esVia} onToggle={tocar} />
           {esVia && caso.viaAtencion !== "presencial" ? (
             <div className="flex flex-wrap gap-2">
               <input value={enlace} onChange={(e) => setEnlace(e.target.value)} placeholder="Link de pago, https://…" className="h-11 min-w-0 flex-1 rounded-2xl border border-line bg-card px-3" />
@@ -877,7 +881,7 @@ export function BloquePiloto({
 
       {esOp ? (
         <>
-        <Marcas items={MARCAS_OP} activas={marcas} disabled={ocupado} onToggle={tocar} />
+        <Marcas items={MARCAS_OP.filter((item) => pasosOn[item.id] !== false)} activas={marcas} disabled={ocupado} onToggle={tocar} />
         {marcas.includes("tarjeta_recibida") || caso.estadoTarjeta === "Expedida" || caso.tarjetaEntregada ? (
           <>
           <p className="text-sm text-ink-soft">
@@ -904,7 +908,7 @@ export function BloquePiloto({
             disabled={ocupado}
             onToggle={tocarEntrega}
           />
-          <Marcas items={MARCAS_SERVICIO} activas={marcas} disabled={ocupado} onToggle={tocar} />
+          <Marcas items={MARCAS_SERVICIO.filter((item) => pasosOn[item.id] !== false)} activas={marcas} disabled={ocupado} onToggle={tocar} />
           <ConsecutivosBonos
             valor={bonos}
             onChange={setBonos}

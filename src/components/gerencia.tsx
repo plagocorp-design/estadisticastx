@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { BarChart3, FileText, GitBranch, KeyRound, LayoutDashboard, ListChecks, LogOut, Type, Users } from "lucide-react";
+import { BarChart3, FileText, KeyRound, LayoutDashboard, ListChecks, LogOut, Users } from "lucide-react";
 import { signOut } from "@/lib/auth/client";
-import { TEXTOS_BASE, type CiudadConfig } from "@/lib/gerencia";
+import { parteDeDoc, type CiudadConfig } from "@/lib/gerencia";
 import {
   claveUsuario,
   crearCiudad,
@@ -48,14 +48,12 @@ const SECCIONES = [
   ["usuarios", "Usuarios", Users],
   ["documentos", "Documentos", FileText],
   ["pasos", "Pasos", ListChecks],
-  ["textos", "Textos", Type],
-  ["flujo", "Flujo", GitBranch],
   ["contrato", "Contrato", FileText],
 ] as const;
 
 type Seccion = (typeof SECCIONES)[number][0] | "accesos";
 
-const GRUPOS_PASO = ["Inicio", "Documentos", "Firma", "Póliza", "Tarjeta", "Extra"];
+const GRUPOS_PASO = ["Inicio", "Documentos", "Firma", "Póliza", "Tarjeta", "Operativa", "Vía Seguros", "Servicio", "Extra"];
 const COLORES = ["#1B3A4B", "#8FBF2F", "#C45C26", "#3D6B8C", "#6B4C7A"];
 
 const ROLES = [
@@ -89,6 +87,7 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
   const [seccion, setSeccion] = useState<Seccion>("dashboard");
   const [serie, setSerie] = useState<Awaited<ReturnType<typeof seriePais>>>([]);
   const [pdf, setPdf] = useState("");
+  const [detalle, setDetalle] = useState("");
   const [pdfOficial, setPdfOficial] = useState(true);
 
   async function cargar() {
@@ -185,7 +184,6 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
     setError("");
     try {
       await guardarConfigCiudad({ data: { ciudadId, config } });
-      setAviso("Quedó guardado para esta ciudad. Bogotá no cambia si editaste otra.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No pude guardar");
     } finally {
@@ -317,45 +315,47 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
                   </article>
                 ))}
               </section>
-              <section className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-                <div className="rounded-card border border-line bg-card p-4">
-                  <h2 className="font-semibold">Dónde estamos</h2>
-                  <MapaPais ciudades={ciudades} activa={ciudadId} onElegir={(id) => { setCiudadId(id); setSeccion("informe"); }} />
-                  <form onSubmit={(event) => void nuevaCiudad(event)} className="mt-3 flex gap-2">
-                    <input value={nombreCiudad} onChange={(event) => setNombreCiudad(event.target.value)} placeholder="Nueva ciudad" className="h-11 flex-1 rounded-2xl border border-line px-3" />
-                    <button type="submit" className="h-11 rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">Crear</button>
-                  </form>
+              <section className="rounded-card border border-line bg-card p-4">
+                <h2 className="font-semibold">Dónde estamos</h2>
+                <p className="mt-1 text-sm text-ink-soft">Toca una ciudad para abrir su informe.</p>
+                <MapaPais ciudades={ciudades} activa={ciudadId} onElegir={(id) => { setCiudadId(id); setSeccion("informe"); }} />
+              </section>
+              <form onSubmit={(event) => void nuevaCiudad(event)} className="relative z-10 flex gap-2 rounded-card border border-line bg-card p-4">
+                <input value={nombreCiudad} onChange={(event) => setNombreCiudad(event.target.value)} placeholder="Nueva ciudad" className="h-11 min-w-0 flex-1 rounded-2xl border border-line px-3" />
+                <button type="submit" className="h-11 shrink-0 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper">Crear ciudad</button>
+              </form>
+              <section className="rounded-card border border-line bg-card p-4">
+                <h2 className="font-semibold">Pólizas por mes y ciudad</h2>
+                <div className="mt-3 h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={comparacion}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="mes" />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Legend />
+                      {nombresSerie.map((nombreSerie, indice) => (
+                        <Line key={nombreSerie} type="monotone" dataKey={nombreSerie} stroke={COLORES[indice % COLORES.length]} strokeWidth={2} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
-                <div className="rounded-card border border-line bg-card p-4">
-                  <h2 className="font-semibold">Pólizas por mes y ciudad</h2>
-                  <div className="mt-3 h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={comparacion}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="mes" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Legend />
-                        {nombresSerie.map((nombre, indice) => (
-                          <Line key={nombre} type="monotone" dataKey={nombre} stroke={COLORES[indice % COLORES.length]} strokeWidth={2} />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="mt-4 h-56">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={ciudades}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="nombre" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="abiertos" fill="#1B3A4B" name="Abiertos" />
-                        <Bar dataKey="polizas" fill="#8FBF2F" name="Pólizas" />
-                        <Bar dataKey="completados" fill="#3D6B8C" name="Completados" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+              </section>
+              <section className="rounded-card border border-line bg-card p-4">
+                <h2 className="font-semibold">Ciudades, una al lado de la otra</h2>
+                <div className="mt-3 h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={ciudades}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="nombre" />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="abiertos" fill="#1B3A4B" name="Abiertos" />
+                      <Bar dataKey="polizas" fill="#8FBF2F" name="Pólizas" />
+                      <Bar dataKey="completados" fill="#3D6B8C" name="Completados" />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </section>
             </>
@@ -367,43 +367,61 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
                 <h2 className="font-semibold">Informe de {ciudad.nombre}</h2>
                 <button type="button" onClick={bajarInforme} className="h-10 rounded-xl border border-line px-3 text-sm font-semibold">Bajar informe</button>
               </div>
-              <div className="h-72 rounded-card border border-line bg-card p-4">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={informe.embudo}>
+              <p className="text-sm text-ink-soft">Toca una barra para ver las placas de ese grupo.</p>
+              <div className="h-[28rem] rounded-card border border-line bg-card p-4">
+                <p className="mb-2 font-semibold">Cómo van</p>
+                <ResponsiveContainer width="100%" height="90%">
+                  <BarChart data={informe.embudo} margin={{ bottom: 48 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="estado" interval={0} angle={-25} textAnchor="end" height={70} />
+                    <XAxis dataKey="estado" interval={0} angle={-28} textAnchor="end" height={80} />
                     <YAxis allowDecimals={false} />
                     <Tooltip />
-                    <Bar dataKey="total" fill="#1B3A4B" name="Procesos" />
+                    <Bar dataKey="total" fill="#1B3A4B" name="Procesos" onClick={(barra) => setDetalle(`estado:${String((barra as { estado?: string }).estado ?? "")}`)} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="h-64 rounded-card border border-line bg-card p-4">
-                  <p className="mb-2 text-sm font-semibold">De qué empresa salieron</p>
-                  <ResponsiveContainer width="100%" height="85%">
-                    <BarChart data={informe.empresas} layout="vertical">
-                      <XAxis type="number" allowDecimals={false} />
-                      <YAxis type="category" dataKey="empresa" width={110} />
-                      <Tooltip />
-                      <Bar dataKey="total" fill="#1B3A4B" name="Vehículos" />
-                      <Bar dataKey="polizas" fill="#8FBF2F" name="Con póliza" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="h-64 rounded-card border border-line bg-card p-4">
-                  <p className="mb-2 text-sm font-semibold">Por dónde llegaron</p>
-                  <ResponsiveContainer width="100%" height="85%">
-                    <BarChart data={informe.origenes}>
-                      <XAxis dataKey="origen" />
-                      <YAxis allowDecimals={false} />
-                      <Tooltip />
-                      <Bar dataKey="total" fill="#3D6B8C" name="Entraron" />
-                      <Bar dataKey="polizas" fill="#8FBF2F" name="Con póliza" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="h-[28rem] rounded-card border border-line bg-card p-4">
+                <p className="mb-2 font-semibold">De qué empresa salieron</p>
+                <ResponsiveContainer width="100%" height="90%">
+                  <BarChart data={informe.empresas} layout="vertical" margin={{ left: 24 }}>
+                    <XAxis type="number" allowDecimals={false} />
+                    <YAxis type="category" dataKey="empresa" width={160} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="total" fill="#1B3A4B" name="Vehículos" onClick={(barra) => setDetalle(`empresa:${String((barra as { empresa?: string }).empresa ?? "")}`)} />
+                    <Bar dataKey="polizas" fill="#8FBF2F" name="Con póliza" />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
+              <div className="h-[24rem] rounded-card border border-line bg-card p-4">
+                <p className="mb-2 font-semibold">Por dónde llegaron</p>
+                <ResponsiveContainer width="100%" height="88%">
+                  <BarChart data={informe.origenes}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="origen" interval={0} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="total" fill="#3D6B8C" name="Entraron" onClick={(barra) => setDetalle(`origen:${String((barra as { origen?: string }).origen ?? "")}`)} />
+                    <Bar dataKey="polizas" fill="#8FBF2F" name="Con póliza" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {detalle && informe.lista ? (
+                <div className="rounded-card border border-line bg-card p-4 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">{detalle.split(":").slice(1).join(":") || "Selección"} · {informe.lista.filter((fila) => fila[detalle.startsWith("estado:") ? "estado" : detalle.startsWith("origen:") ? "origen" : "empresa"] === detalle.split(":").slice(1).join(":")).length} placas</p>
+                    <button type="button" className="h-9 rounded-xl border border-line px-3" onClick={() => setDetalle("")}>Cerrar</button>
+                  </div>
+                  <ul className="mt-3 grid gap-1">
+                    {informe.lista
+                      .filter((fila) => fila[detalle.startsWith("estado:") ? "estado" : detalle.startsWith("origen:") ? "origen" : "empresa"] === detalle.split(":").slice(1).join(":"))
+                      .map((fila) => (
+                        <li key={fila.placa}>{fila.placa} · {fila.nombre} · {fila.asesor} · {fila.estado}</li>
+                      ))}
+                  </ul>
+                </div>
+              ) : null}
               <div className="rounded-card border border-line bg-card p-4 text-sm">
                 <p className="font-semibold">Meta del mes</p>
                 <ul className="mt-2 grid gap-1">{informe.metas.length === 0 ? <li>Sin asesores.</li> : informe.metas.map((fila) => <li key={fila.nombre}>{fila.nombre}: {fila.hechas} de {fila.meta}</li>)}</ul>
@@ -451,19 +469,22 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
           {seccion === "documentos" && config ? (
             <section className="rounded-card border border-line bg-card p-4">
               <h2 className="font-semibold">Documentos</h2>
-              <p className="mt-1 text-sm text-ink-soft">El número es cuántas copias salen cuando se arma el paquete para imprimir. 2 en tarjeta de propiedad y en tarjeta de operación son dos de cada una. 1 es una sola. Activo es si el asesor lo puede subir.</p>
+              <p className="mt-1 text-sm text-ink-soft">Activo es si se pide. La parte dice en qué pestaña del proceso lo sube el asesor. El número son las copias al imprimir: 2 en las tarjetas son dos de cada una. SOAT, tecnomecánica y formulario no se piden en Bogotá hasta que los prendas.</p>
               <div className="mt-3 grid gap-2">
                 {config.documentos.map((doc, index) => (
-                  <div key={doc.id} className="grid gap-2 rounded-2xl border border-line p-3 sm:grid-cols-[1fr_7rem_auto]">
+                  <div key={doc.id} className="grid gap-2 rounded-2xl border border-line p-3 sm:grid-cols-[1fr_11rem_6rem_auto]">
                     <input value={doc.label} onChange={(event) => { const documentos = config.documentos.slice(); documentos[index] = { ...doc, label: event.target.value }; setConfig({ ...config, documentos }); }} className="h-10 rounded-xl border border-line px-3 text-sm" />
+                    <select value={doc.parte || parteDeDoc(doc.id)} onChange={(event) => { const documentos = config.documentos.slice(); documentos[index] = { ...doc, parte: event.target.value }; setConfig({ ...config, documentos }); }} className="h-10 rounded-xl border border-line px-2 text-sm">
+                      {GRUPOS_PASO.filter((grupo) => grupo !== "Extra" && grupo !== "Operativa" && grupo !== "Vía Seguros" && grupo !== "Servicio").map((grupo) => <option key={grupo}>{grupo}</option>)}
+                    </select>
                     <label className="text-xs text-ink-soft">Copias
                       <input type="number" min={1} max={4} value={doc.copias} onChange={(event) => { const documentos = config.documentos.slice(); documentos[index] = { ...doc, copias: Number(event.target.value) || 1 }; setConfig({ ...config, documentos }); }} className="mt-1 h-10 w-full rounded-xl border border-line px-3 text-sm" />
                     </label>
-                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={doc.activo} onChange={(event) => { const documentos = config.documentos.slice(); documentos[index] = { ...doc, activo: event.target.checked }; setConfig({ ...config, documentos }); }} /> Activo</label>
+                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={doc.activo} onChange={(event) => { const documentos = config.documentos.slice(); documentos[index] = { ...doc, activo: event.target.checked, parte: doc.parte || parteDeDoc(doc.id) }; setConfig({ ...config, documentos }); }} /> Pedirlo</label>
                   </div>
                 ))}
               </div>
-              <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); const id = docNuevo.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); if (id.length < 3 || config.documentos.some((doc) => doc.id === id)) return; setConfig({ ...config, documentos: [...config.documentos, { id, label: docNuevo.trim(), obligatorio: false, copias: 1, vigencia: false, activo: true }] }); setDocNuevo(""); }}>
+              <form className="mt-3 flex gap-2" onSubmit={(event) => { event.preventDefault(); const id = docNuevo.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); if (id.length < 3 || config.documentos.some((doc) => doc.id === id)) return; setConfig({ ...config, documentos: [...config.documentos, { id, label: docNuevo.trim(), obligatorio: false, copias: 1, vigencia: false, activo: true, parte: "Documentos" }] }); setDocNuevo(""); }}>
                 <input value={docNuevo} onChange={(event) => setDocNuevo(event.target.value)} placeholder="Documento nuevo" className="h-11 flex-1 rounded-2xl border border-line px-3" />
                 <button type="submit" className="h-11 rounded-2xl border border-line px-3 text-sm font-semibold">Agregar</button>
               </form>
@@ -498,30 +519,6 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
                 <input value={pasoNuevo} onChange={(event) => setPasoNuevo(event.target.value)} placeholder="Paso nuevo" className="h-11 flex-1 rounded-2xl border border-line px-3" />
                 <button type="submit" className="h-11 rounded-2xl border border-line px-3 text-sm font-semibold">Agregar</button>
               </form>
-            </section>
-          ) : null}
-
-          {seccion === "textos" && config ? (
-            <section className="rounded-card border border-line bg-card p-4">
-              <h2 className="font-semibold">Textos</h2>
-              <div className="mt-3 grid gap-3">
-                {TEXTOS_BASE.map((item) => (
-                  <label key={item.clave} className="grid gap-1 text-sm">
-                    {item.label}
-                    <input value={config.textos[item.clave] ?? ""} onChange={(event) => setConfig({ ...config, textos: { ...config.textos, [item.clave]: event.target.value } })} className="h-11 rounded-2xl border border-line px-3" />
-                  </label>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {seccion === "flujo" && config ? (
-            <section className="rounded-card border border-line bg-card p-4">
-              <h2 className="font-semibold">Flujo</h2>
-              <label className="mt-3 flex items-start gap-2 text-sm">
-                <input type="checkbox" checked={config.flujo.operativaAntesDePago} onChange={(event) => setConfig({ ...config, flujo: { ...config.flujo, operativaAntesDePago: event.target.checked } })} />
-                <span>Se puede enviar a operativa antes de que Vía Seguros reciba el pago. Bogotá lo tiene prendido.</span>
-              </label>
             </section>
           ) : null}
 

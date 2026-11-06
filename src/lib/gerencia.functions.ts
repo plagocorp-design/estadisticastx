@@ -496,14 +496,16 @@ export const informeCiudad = createServerFn({ method: "GET" })
     for (const fila of filas) {
       const estado = etapaDe(fila);
       embudoMapa.set(estado, (embudoMapa.get(estado) ?? 0) + 1);
-      const empresa = empresaMapa.get(fila.empresa) ?? { total: 0, polizas: 0 };
+      const origen = (fila.origen || "").trim() || "Sin origen";
+      const empresaNombre = (fila.empresa || "").trim() || "Sin empresa";
+      const empresa = empresaMapa.get(empresaNombre) ?? { total: 0, polizas: 0 };
       empresa.total += 1;
       if (fila.polizas_subidas) empresa.polizas += 1;
-      empresaMapa.set(fila.empresa, empresa);
-      const origen = origenMapa.get(fila.origen) ?? { total: 0, polizas: 0 };
-      origen.total += 1;
-      if (fila.polizas_subidas) origen.polizas += 1;
-      origenMapa.set(fila.origen, origen);
+      empresaMapa.set(empresaNombre, empresa);
+      const origenFila = origenMapa.get(origen) ?? { total: 0, polizas: 0 };
+      origenFila.total += 1;
+      if (fila.polizas_subidas) origenFila.polizas += 1;
+      origenMapa.set(origen, origenFila);
       const motivo = fila.motivo_cierre.trim();
       if (motivo) motivoMapa.set(motivo, (motivoMapa.get(motivo) ?? 0) + 1);
     }
@@ -538,6 +540,14 @@ export const informeCiudad = createServerFn({ method: "GET" })
       demorados,
       citas,
       metas,
+      lista: filas.map((fila) => ({
+        placa: fila.placa,
+        nombre: fila.nombre,
+        estado: etapaDe(fila),
+        origen: (fila.origen || "").trim() || "Sin origen",
+        empresa: (fila.empresa || "").trim() || "Sin empresa",
+        asesor: fila.asesor,
+      })),
     };
   });
 
