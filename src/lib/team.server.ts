@@ -46,8 +46,9 @@ export async function ensureTeamAccounts() {
 
 export async function profileFor(userId: string) {
   const sql = await getSql();
-  const rows = await sql<{ user_id: string; slug: string; name: string; role: Role; ciudad_id: number | null; ciudad_vista: number | null }>`
-    select user_id, slug, name, role, ciudad_id, ciudad_vista from profiles where user_id = ${userId}
+  await sql.query(`alter table profiles add column if not exists acceso text not null default ''`);
+  const rows = await sql<{ user_id: string; slug: string; name: string; role: Role; ciudad_id: number | null; ciudad_vista: number | null; acceso: string }>`
+    select user_id, slug, name, role, ciudad_id, ciudad_vista, coalesce(acceso, '') as acceso from profiles where user_id = ${userId}
   `;
   return rows[0] ?? null;
 }

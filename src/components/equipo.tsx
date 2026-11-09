@@ -1,8 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { agregarAsesor, cambiarClave, cambiarMiClave, cambiarRol, guardarPersona, listEquipo } from "@/lib/control.functions";
-import { estadoPiloto } from "@/lib/piloto.functions";
+import { agregarAsesor, cambiarClave, cambiarMiClave, guardarAcceso, guardarPersona, listEquipo } from "@/lib/control.functions";
 import type { PersonaEquipo } from "@/lib/control";
-import { etiquetaRol, llevaProcesos } from "@/lib/team.public";
+import { AREAS_APP, PODERES_APP, SECCIONES_APP, accesoDe, accesoVacio, esBandeja, etiquetaRol, llevaProcesos, type Acceso } from "@/lib/team.public";
 
 function textoCredencial(persona: PersonaEquipo) {
   return `Usuario: ${persona.slug}\nClave: ${persona.clave ?? ""}`;
@@ -26,12 +25,12 @@ async function copiarTexto(texto: string) {
 
 export function EquipoVista({ edita }: { edita: boolean }) {
   const [gente, setGente] = useState<PersonaEquipo[]>([]);
-  const [areas, setAreas] = useState<{ slug: string; name: string; role: string; clave: string }[]>([]);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [nombre, setNombre] = useState("");
   const [usuario, setUsuario] = useState("");
   const [clave, setClave] = useState("");
+  const [accesoNuevo, setAccesoNuevo] = useState<Acceso>(accesoVacio());
   const [verClave, setVerClave] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [copiadas, setCopiadas] = useState(false);
@@ -39,9 +38,6 @@ export function EquipoVista({ edita }: { edita: boolean }) {
   async function cargar() {
     const equipo = await listEquipo();
     setGente(equipo);
-    if (!edita) return;
-    const piloto = await estadoPiloto().catch(() => null);
-    setAreas(piloto?.usuarios ?? []);
   }
 
   useEffect(() => {
@@ -75,11 +71,12 @@ export function EquipoVista({ edita }: { edita: boolean }) {
     setError("");
     setAviso("");
     try {
-      await agregarAsesor({ data: { nombre, usuario, clave } });
+      await agregarAsesor({ data: { nombre, usuario, clave, acceso: accesoNuevo } });
       setNombre("");
       setUsuario("");
       setClave("");
-      setAviso("Asesor creado. Ya puede entrar con ese usuario y esa clave.");
+      setAccesoNuevo(accesoVacio());
+      setAviso("Perfil creado. Ya puede entrar con ese usuario y esa clave, solo a lo que marcaste.");
       await cargar();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No pude crear el asesor");
@@ -88,15 +85,15 @@ export function EquipoVista({ edita }: { edita: boolean }) {
     }
   }
 
-  async function cambiar(slug: string, role: "asesor" | "lider" | "coordinadora") {
+  async function guardarAccesoDe(slug: string, acceso: Acceso) {
     setError("");
     setAviso("");
     try {
-      await cambiarRol({ data: { slug, role } });
-      setAviso("Rol actualizado.");
+      await guardarAcceso({ data: { slug, acceso } });
+      setAviso("Acceso actualizado. La próxima vez que entre, ve solo esas secciones.");
       await cargar();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No pude cambiar el rol");
+      setError(err instanceof Error ? err.message : "No pude cambiar el acceso");
     }
   }
 
@@ -114,7 +111,8 @@ export function EquipoVista({ edita }: { edita: boolean }) {
     }
   }
   const calle = gente.filter((p) => llevaProcesos(p.role));
-  const coordinacion = gente.filter((p) => !llevaProcesos(p.role));
+  const coordinacion = gente.filter((p) => p.role === "coordinadora");
+  const deArea = gente.filter((p) => esBandeja(p.role));
 
   return (
     <section>
@@ -130,10 +128,7 @@ export function EquipoVista({ edita }: { edita: boolean }) {
         <button
           type="button"
           onClick={() => {
-            const texto = [
-              ...gente.filter((persona) => persona.clave).map((persona) => `${persona.name}\n${textoCredencial(persona)}`),
-              ...areas.filter((persona) => persona.clave).map((persona) => `${persona.name}\nUsuario: ${persona.slug}\nClave: ${persona.clave}`),
-            ].join("\n\n");
+            const texto = gente.filter((persona) => persona.clave).map((persona) => `${persona.name}\n${textoCredencial(persona)}`).join("\n\n");
             void copiarTexto(texto).then(() => {
               setCopiadas(true);
               window.setTimeout(() => setCopiadas(false), 1500);
@@ -147,51 +142,26 @@ export function EquipoVista({ edita }: { edita: boolean }) {
       <h2 className="mt-4 text-sm font-semibold">Asesores</h2>
       <ul className="mt-2 grid gap-3">
         {calle.map((persona) => (
-          <PersonaCard key={persona.slug} persona={persona} edita={edita} guardar={guardar} onRol={(role) => void cambiar(persona.slug, role)} onClave={ponerClave} />
+          <PersonaCard key={persona.slug} persona={persona} edita={edita} guardar={guardar} onAcceso={(acceso) => void guardarAccesoDe(persona.slug, acceso)} onClave={ponerClave} />
         ))}
       </ul>
       <h2 className="mt-5 text-sm font-semibold">Coordinación</h2>
       <ul className="mt-2 grid gap-3">
         {coordinacion.map((persona) => (
-          <PersonaCard key={persona.slug} persona={persona} edita={edita} guardar={guardar} onRol={(role) => void cambiar(persona.slug, role)} onClave={ponerClave} />
+          <PersonaCard key={persona.slug} persona={persona} edita={edita} guardar={guardar} onAcceso={(acceso) => void guardarAccesoDe(persona.slug, acceso)} onClave={ponerClave} />
         ))}
       </ul>
-      {edita ? (
-        <>
-          <h2 className="mt-5 text-sm font-semibold">Otras áreas</h2>
-          <p className="mt-1 text-sm text-ink-soft">No tienen horario ni meta. Se crean en Piloto. Si esta lista está vacía, es que todavía no se han creado: los de arriba no se tocaron.</p>
-          <ul className="mt-2 grid gap-2">
-            {areas.map((persona) => (
-              <li key={persona.slug} className="rounded-card border border-line bg-card px-4 py-3 text-sm">
-                <span className="font-semibold">{persona.name}</span>
-                <span className="text-ink-soft"> · {etiquetaRol(persona.role)} · {persona.slug}</span>
-                {persona.clave ? <span className="block text-ink-soft">Clave: {persona.clave}</span> : null}
-              </li>
-            ))}
-            {areas.length === 0 ? <li className="text-sm text-ink-soft">Todavía no hay usuarios de Vía Seguros, operativa o servicio al cliente.</li> : null}
-          </ul>
-        </>
-      ) : null}
-      {edita ? (
-        <>
-          <h2 className="mt-5 text-sm font-semibold">Otras áreas</h2>
-          <p className="mt-1 text-sm text-ink-soft">No tienen horario ni meta. Se crean en Piloto. Si esta lista está vacía, es que todavía no se han creado: los diez de arriba no se tocaron.</p>
-          <ul className="mt-2 grid gap-2">
-            {areas.map((persona) => (
-              <li key={persona.slug} className="rounded-card border border-line bg-card px-4 py-3 text-sm">
-                <span className="font-semibold">{persona.name}</span>
-                <span className="text-ink-soft"> · {etiquetaRol(persona.role)} · {persona.slug}</span>
-                {persona.clave ? <span className="block text-ink-soft">Clave: {persona.clave}</span> : null}
-              </li>
-            ))}
-            {areas.length === 0 ? <li className="text-sm text-ink-soft">Todavía no hay usuarios de Vía Seguros, operativa o servicio al cliente.</li> : null}
-          </ul>
-        </>
-      ) : null}
+      <h2 className="mt-5 text-sm font-semibold">Otras áreas</h2>
+      <ul className="mt-2 grid gap-3">
+        {deArea.map((persona) => (
+          <PersonaCard key={persona.slug} persona={persona} edita={edita} guardar={guardar} onAcceso={(acceso) => void guardarAccesoDe(persona.slug, acceso)} onClave={ponerClave} />
+        ))}
+        {deArea.length === 0 ? <li className="text-sm text-ink-soft">Todavía no hay usuarios de Vía Seguros, operativa o servicio al cliente.</li> : null}
+      </ul>
       {edita ? (
         <form onSubmit={(e) => void crear(e)} className="mt-4 max-w-xl rounded-card border border-line bg-card p-4">
-          <p className="font-semibold">Agregar asesor</p>
-          <p className="mt-1 text-sm text-ink-soft">Entra con el usuario y la clave que pongas aquí. No se borra el historial de nadie: se desactiva.</p>
+          <p className="font-semibold">Crear perfil</p>
+          <p className="mt-1 text-sm text-ink-soft">Elige qué puede hacer y a qué secciones entra. Entra con el usuario y la clave de aquí.</p>
           <div className="mt-3 grid gap-2">
             <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre" className="h-11 rounded-2xl border border-line px-3" />
             <input value={usuario} onChange={(e) => setUsuario(e.target.value)} placeholder="Usuario, sin espacios" className="h-11 rounded-2xl border border-line px-3" />
@@ -208,9 +178,10 @@ export function EquipoVista({ edita }: { edita: boolean }) {
                 {verClave ? "Ocultar" : "Ver"}
               </button>
             </label>
+            <SelectorAcceso value={accesoNuevo} onChange={setAccesoNuevo} />
           </div>
           <button type="submit" disabled={guardando} className="mt-3 h-11 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper disabled:opacity-60">
-            {guardando ? "Creando…" : "Crear asesor"}
+            {guardando ? "Creando…" : "Crear perfil"}
           </button>
         </form>
       ) : null}
@@ -222,13 +193,13 @@ function PersonaCard({
   persona,
   edita,
   guardar,
-  onRol,
+  onAcceso,
   onClave,
 }: {
   persona: PersonaEquipo;
   edita: boolean;
   guardar: (persona: PersonaEquipo, cambio: Partial<PersonaEquipo>) => Promise<void>;
-  onRol: (role: "asesor" | "lider" | "coordinadora") => void;
+  onAcceso: (acceso: Acceso) => void;
   onClave: (slug: string, clave: string) => Promise<boolean>;
 }) {
   const horario = llevaProcesos(persona.role);
@@ -236,23 +207,12 @@ function PersonaCard({
   const [ver, setVer] = useState(false);
   const [guardandoClave, setGuardandoClave] = useState(false);
   const [copiado, setCopiado] = useState(false);
+  const [acceso, setAcceso] = useState<Acceso>(() => accesoDe(persona.role, persona.acceso));
   return (
     <li className={"rounded-card border border-line bg-card p-4 " + (persona.activo ? "" : "opacity-70")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold">{persona.name}</p>
-        {edita && persona.slug !== "david" ? (
-          <select
-            value={persona.role}
-            onChange={(e) => onRol(e.target.value as "asesor" | "lider" | "coordinadora")}
-            className="h-10 rounded-2xl border border-line px-3 text-sm"
-          >
-            <option value="asesor">Asesor</option>
-            <option value="lider">Asesor líder</option>
-            <option value="coordinadora">Coordinación</option>
-          </select>
-        ) : (
-          <p className="text-sm font-medium text-ink-soft">{etiquetaRol(persona.role)}</p>
-        )}
+        <p className="text-sm font-medium text-ink-soft">{etiquetaRol(persona.role)}</p>
       </div>
       {edita ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
@@ -273,6 +233,14 @@ function PersonaCard({
             className="h-8 rounded-full border border-line px-3 text-xs font-semibold disabled:opacity-50"
           >
             {copiado ? "Copiado" : "Copiar credenciales"}
+          </button>
+        </div>
+      ) : null}
+      {edita ? (
+        <div className="mt-3">
+          <SelectorAcceso value={acceso} onChange={setAcceso} bloqueado={persona.slug === "david"} />
+          <button type="button" onClick={() => onAcceso(acceso)} className="mt-2 h-10 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper">
+            Guardar acceso
           </button>
         </div>
       ) : null}
@@ -366,6 +334,68 @@ function PersonaCard({
         </form>
       ) : null}
     </li>
+  );
+}
+
+export function SelectorAcceso({ value, onChange, bloqueado }: { value: Acceso; onChange: (acceso: Acceso) => void; bloqueado?: boolean }) {
+  function poner(next: Acceso) {
+    if (bloqueado) {
+      onChange({ ...next, poderes: ["propios", "ver_equipo", "configurar"], area: "" });
+      return;
+    }
+    onChange(next);
+  }
+  function seccion(id: string, on: boolean) {
+    const secciones = on ? [...new Set([...value.secciones, id])] : value.secciones.filter((item) => item !== id);
+    const poderes = id === "equipo" || id === "auditoria" ? (on ? [...new Set([...value.poderes, "ver_equipo"])] : value.poderes) : value.poderes;
+    poner({ ...value, secciones, poderes });
+  }
+  function poder(id: string, on: boolean) {
+    let poderes = on ? [...new Set([...value.poderes, id])] : value.poderes.filter((item) => item !== id);
+    if (id === "configurar" && on) poderes = [...new Set([...poderes, "ver_equipo"])];
+    if (id === "ver_equipo" && !on) poderes = poderes.filter((item) => item !== "configurar");
+    let secciones = value.secciones;
+    if (poderes.includes("ver_equipo")) secciones = [...new Set([...secciones, "equipo", "auditoria"])];
+    poner({ ...value, poderes, secciones, area: poderes.includes("ver_equipo") || poderes.includes("configurar") ? "" : value.area });
+  }
+  return (
+    <div className="grid gap-3 rounded-2xl border border-line p-3">
+      <div>
+        <p className="text-sm font-semibold">Qué puede hacer</p>
+        <div className="mt-2 grid gap-1">
+          {PODERES_APP.map((item) => (
+            <label key={item.id} className="flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-1" disabled={bloqueado} checked={value.poderes.includes(item.id)} onChange={(e) => poder(item.id, e.target.checked)} />
+              {item.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <label className="text-sm font-semibold">
+        Área
+        <select
+          value={value.area}
+          disabled={bloqueado}
+          onChange={(e) => poner({ ...value, area: e.target.value, poderes: e.target.value ? value.poderes.filter((id) => id === "propios") : value.poderes })}
+          className="mt-1 h-11 w-full rounded-2xl border border-line px-3 font-normal"
+        >
+          {AREAS_APP.map((item) => (
+            <option key={item.id || "ninguna"} value={item.id}>{item.label}</option>
+          ))}
+        </select>
+      </label>
+      <div>
+        <p className="text-sm font-semibold">Secciones a las que entra</p>
+        <div className="mt-2 grid gap-1 sm:grid-cols-2">
+          {SECCIONES_APP.map((item) => (
+            <label key={item.id} className="flex items-center gap-2 text-sm font-normal">
+              <input type="checkbox" checked={value.secciones.includes(item.id)} onChange={(e) => seccion(item.id, e.target.checked)} />
+              {item.label}
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

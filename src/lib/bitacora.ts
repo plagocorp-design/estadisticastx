@@ -22,6 +22,7 @@ export type Bitacora = {
   detalleCalle: string;
   trabas: string;
   manana: string;
+  enviada: boolean;
 };
 
 export type BitacoraDraft = {

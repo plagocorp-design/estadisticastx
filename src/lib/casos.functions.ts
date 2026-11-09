@@ -6,7 +6,7 @@ import { casosDeArea, entregaDe, entregaLista, faseDe, hoyBogota, otrosPropietar
 import { configura, esBandeja, esGerencia, llevaProcesos, veElEquipo, type Role } from "@/lib/team.public";
 import { unificarEmpresa } from "@/lib/empresas";
 
-export type Me = { id: string; name: string; slug: string; role: Role; ciudadVista: number | null };
+export type Me = { id: string; name: string; slug: string; role: Role; ciudadVista: number | null; acceso: string };
 
 export const CASO_COLS = `
   c.id, c.owner_id, p.name as owner_name, c.placa, c.cc, c.nombre, c.telefono, c.empresa,
@@ -36,7 +36,7 @@ export const getMe = createServerFn({ method: "GET" })
     const { profileFor } = await import("./team.server");
     const profile = await profileFor(context.userId);
     if (!profile) return null;
-    return { id: profile.user_id, name: profile.name, slug: profile.slug, role: profile.role, ciudadVista: profile.ciudad_vista };
+    return { id: profile.user_id, name: profile.name, slug: profile.slug, role: profile.role, ciudadVista: profile.ciudad_vista, acceso: profile.acceso ?? "" };
   });
 
 export const listCasos = createServerFn({ method: "GET" })
@@ -57,6 +57,7 @@ export const listCasos = createServerFn({ method: "GET" })
       [hoy],
     );
     const ciudad = esGerencia(profile.role) ? (profile.ciudad_vista ?? 0) : (profile.ciudad_id ?? 1);
+    await sql.query(`alter table mensajes add column if not exists para_id text not null default ''`);
     const filtroCiudad = ` and coalesce(c.ciudad_id, 1) = ${ciudad} `;
     const rows = veElEquipo(profile.role) || esBandeja(profile.role)
       ? await sql.query<CasoRow>(
@@ -64,10 +65,22 @@ export const listCasos = createServerFn({ method: "GET" })
           [ciudad],
         )
       : await sql.query<CasoRow>(
-          `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id where c.owner_id = $1 and coalesce(c.ciudad_id, 1) = $2 order by c.created_at desc`,
+          `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id
+           where coalesce(c.ciudad_id, 1) = $2
+             and (
+               c.owner_id = $1
+               or exists (select 1 from mensajes m where m.caso_id = c.id and m.para_id = $1)
+             )
+           order by c.created_at desc`,
           [context.userId, ciudad],
         );
-    const lista = (esBandeja(profile.role) ? casosDeArea(rows.map(toCaso), profile.role) : rows.map(toCaso));
+    const listaBase = esBandeja(profile.role) ? casosDeArea(rows.map(toCaso), profile.role) : rows.map(toCaso);
+    const llamados = esBandeja(profile.role)
+      ? await sql.query<{ caso_id: number }>(`select distinct caso_id from mensajes where para_id = $1`, [context.userId])
+      : [];
+    const ya = new Set(listaBase.map((caso) => caso.id));
+    const extra = rows.map(toCaso).filter((caso) => !ya.has(caso.id) && llamados.some((fila) => Number(fila.caso_id) === caso.id));
+    const lista = [...extra, ...listaBase];
     const ultimos = await sql.query<{ entidad_id: string; actor_name: string; created_at: string }>(
       `select distinct on (entidad_id) entidad_id, actor_name, created_at
        from auditoria
@@ -790,7 +803,7 @@ export const cargarRespaldo = createServerFn({ method: "POST" })
       const id = entero(fila.id, null);
       const casoId = entero(fila.caso_id ?? "", null);
       if (!id || !fila.owner_id || !usuarios.has(fila.owner_id) || !(fila.fecha || "").slice(0, 10)) continue;
-      const tipo = ["visita", "llamada", "escribir", "otro"].includes(fila.tipo) ? fila.tipo : "otro";
+      const tipo = ["visita", "llamada", "escribir", "otro", "distintivos"].includes(fila.tipo) ? fila.tipo : "otro";
       await guardarFila(sql, "agenda", ["id"], [
         { nombre: "id", valor: id },
         { nombre: "owner_id", valor: fila.owner_id },

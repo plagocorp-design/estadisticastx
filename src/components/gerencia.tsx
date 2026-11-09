@@ -3,6 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BarChart3, FileText, KeyRound, LayoutDashboard, ListChecks, LogOut, Users } from "lucide-react";
 import { signOut } from "@/lib/auth/client";
+import { SelectorAcceso } from "@/components/equipo";
+import { accesoVacio, type Acceso } from "@/lib/team.public";
 import { parteDeDoc, type CiudadConfig } from "@/lib/gerencia";
 import {
   claveUsuario,
@@ -56,15 +58,6 @@ type Seccion = (typeof SECCIONES)[number][0] | "accesos";
 const GRUPOS_PASO = ["Inicio", "Documentos", "Firma", "Póliza", "Tarjeta", "Operativa", "Vía Seguros", "Servicio", "Extra"];
 const COLORES = ["#1B3A4B", "#8FBF2F", "#C45C26", "#3D6B8C", "#6B4C7A"];
 
-const ROLES = [
-  ["asesor", "Asesor"],
-  ["lider", "Líder de ciudad"],
-  ["coordinadora", "Coordinación"],
-  ["via_seguros", "Vía Seguros"],
-  ["operativa", "Operativa"],
-  ["servicio", "Servicio al cliente"],
-] as const;
-
 export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?: (ciudadId: number) => Promise<void> }) {
   const navigate = useNavigate();
   const [ciudades, setCiudades] = useState<Ciudad[]>([]);
@@ -81,6 +74,7 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
   const [otra, setOtra] = useState({ nombre: "", usuario: "", clave: "" });
   const [nombreCiudad, setNombreCiudad] = useState("");
   const [persona, setPersona] = useState({ nombre: "", usuario: "", clave: "", rol: "asesor" });
+  const [accesoNuevo, setAccesoNuevo] = useState<Acceso>(accesoVacio());
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -166,8 +160,9 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
     setOcupado(true);
     setError("");
     try {
-      await crearUsuarioCiudad({ data: { ciudadId, ...persona } });
+      await crearUsuarioCiudad({ data: { ciudadId, nombre: persona.nombre, usuario: persona.usuario, clave: persona.clave, acceso: accesoNuevo } });
       setPersona({ nombre: "", usuario: "", clave: "", rol: "asesor" });
+      setAccesoNuevo(accesoVacio());
       setAviso("Usuario creado. Entra con ese usuario y esa clave.");
       setUsuarios(await usuariosCiudad({ data: ciudadId }));
       await cargar();
@@ -458,9 +453,9 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
                 <input value={persona.nombre} onChange={(e) => setPersona({ ...persona, nombre: e.target.value })} placeholder="Nombre" className="h-11 rounded-2xl border border-line px-3" />
                 <input value={persona.usuario} onChange={(e) => setPersona({ ...persona, usuario: e.target.value })} placeholder="Usuario" className="h-11 rounded-2xl border border-line px-3" />
                 <input value={persona.clave} onChange={(e) => setPersona({ ...persona, clave: e.target.value })} placeholder="Clave" className="h-11 rounded-2xl border border-line px-3" />
-                <select value={persona.rol} onChange={(e) => setPersona({ ...persona, rol: e.target.value })} className="h-11 rounded-2xl border border-line px-3">
-                  {ROLES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                </select>
+                <div className="sm:col-span-2">
+                  <SelectorAcceso value={accesoNuevo} onChange={setAccesoNuevo} />
+                </div>
                 <button type="submit" disabled={ocupado} className="h-11 rounded-2xl bg-lime px-4 text-sm font-semibold sm:col-span-2">Crear usuario</button>
               </form>
             </section>
@@ -515,7 +510,7 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
                   </div>
                 );
               })}
-              <form className="mt-4 flex gap-2" onSubmit={(event) => { event.preventDefault(); const key = "extra_" + pasoNuevo.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); if (key.length < 8 || config.pasos.some((paso) => paso.key === key)) return; setConfig({ ...config, pasos: [...config.pasos, { key, label: pasoNuevo.trim(), grupo: "Extra", activo: true }] }); setPasoNuevo(""); }}>
+              <form className="mt-4 flex gap-2" onSubmit={(event) => { event.preventDefault(); const key = "extra_" + pasoNuevo.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); if (key.length < 8 || config.pasos.some((paso) => paso.key === key)) return; setConfig({ ...config, pasos: [...config.pasos, { key, label: pasoNuevo.trim(), grupo: "Documentos", activo: true }] }); setPasoNuevo(""); }}>
                 <input value={pasoNuevo} onChange={(event) => setPasoNuevo(event.target.value)} placeholder="Paso nuevo" className="h-11 flex-1 rounded-2xl border border-line px-3" />
                 <button type="submit" className="h-11 rounded-2xl border border-line px-3 text-sm font-semibold">Agregar</button>
               </form>

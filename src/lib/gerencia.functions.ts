@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { esGerencia } from "@/lib/team.public";
+import { esGerencia, accesoDe, accesoJson, rolDeAcceso, type Acceso } from "@/lib/team.public";
 import { estadoDe } from "@/lib/casos";
 import { mezclarConfig, CAMPOS_CONTRATO, type CampoContrato, type CiudadConfig, type DocConfig, type FlujoConfig, type PasoConfig } from "@/lib/gerencia";
 
@@ -166,7 +166,7 @@ export const usuariosCiudad = createServerFn({ method: "GET" })
   });
 
 export const crearUsuarioCiudad = createServerFn({ method: "POST" })
-  .validator((input: { ciudadId: number; nombre: string; usuario: string; clave: string; rol: string }) => input)
+  .validator((input: { ciudadId: number; nombre: string; usuario: string; clave: string; rol?: string; acceso?: Acceso }) => input)
   .middleware([authMiddleware])
   .handler(async ({ context, data }) => {
     const profile = await exigirGerencia(context.userId);
@@ -176,7 +176,10 @@ export const crearUsuarioCiudad = createServerFn({ method: "POST" })
     if (nombre.length < 3) throw new Error("Falta el nombre");
     if (slug.length < 3) throw new Error("El usuario necesita al menos 3 letras");
     if (clave.length < 8) throw new Error("La clave necesita al menos 8 caracteres");
-    if (!ROLES_CIUDAD.includes(data.rol as (typeof ROLES_CIUDAD)[number])) throw new Error("Ese rol no se puede asignar");
+    const acceso = data.acceso ? accesoDe("asesor", JSON.stringify(data.acceso)) : null;
+    const rol = acceso ? rolDeAcceso(acceso) : data.rol;
+    if (!ROLES_CIUDAD.includes(rol as (typeof ROLES_CIUDAD)[number])) throw new Error("Ese rol no se puede asignar");
+    if (acceso && acceso.secciones.length === 0) throw new Error("Elige al menos una sección");
     const sql = await getSql();
     const ciudad = await sql.query<{ id: number; nombre: string; activa: boolean }>(
       `select id, nombre, activa from ciudades where id = $1`,
@@ -194,10 +197,11 @@ export const crearUsuarioCiudad = createServerFn({ method: "POST" })
     const usuarios = await sql.query<{ id: string }>(`select id from "user" where email = $1`, [email]);
     const userId = usuarios[0]?.id;
     if (!userId) throw new Error("No pude crear el usuario");
+    await sql.query(`alter table profiles add column if not exists acceso text not null default ''`);
     await sql.query(
-      `insert into profiles (user_id, slug, name, role, ciudad_id) values ($1, $2, $3, $4, $5)
-       on conflict (user_id) do update set slug = excluded.slug, name = excluded.name, role = excluded.role, ciudad_id = excluded.ciudad_id`,
-      [userId, slug, nombre, data.rol, data.ciudadId],
+      `insert into profiles (user_id, slug, name, role, ciudad_id, acceso) values ($1, $2, $3, $4, $5, $6)
+       on conflict (user_id) do update set slug = excluded.slug, name = excluded.name, role = excluded.role, ciudad_id = excluded.ciudad_id, acceso = excluded.acceso`,
+      [userId, slug, nombre, rol, data.ciudadId, acceso ? accesoJson(acceso) : ""],
     );
     await sql.query(
       `insert into claves_equipo (user_id, clave) values ($1, $2) on conflict (user_id) do update set clave = excluded.clave, updated_at = now()`,
@@ -208,7 +212,7 @@ export const crearUsuarioCiudad = createServerFn({ method: "POST" })
       accion: "creo",
       entidad: "equipo",
       etiqueta: slug,
-      detalle: `Gerencia creó a ${nombre} (${slug}) como ${data.rol} en ${ciudad[0].nombre}`,
+      detalle: `Gerencia creó a ${nombre} (${slug}) como ${rol} en ${ciudad[0].nombre}${acceso ? `. Secciones: ${acceso.secciones.join(", ")}` : ""}`,
     });
     return { ok: true };
   });
@@ -218,8 +222,9 @@ export const configMia = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { profileFor } = await import("./team.server");
     const profile = await profileFor(context.userId);
-    if (!profile?.ciudad_id) return mezclarConfig(null);
-    return configDe(profile.ciudad_id);
+    const ciudad = profile?.role === "gerencia" ? profile.ciudad_vista : profile?.ciudad_id;
+    if (!ciudad) return mezclarConfig(null);
+    return configDe(ciudad);
   });
 
 export const leerConfigCiudad = createServerFn({ method: "GET" })

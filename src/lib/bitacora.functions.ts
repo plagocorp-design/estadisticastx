@@ -34,6 +34,22 @@ export const listBitacoras = createServerFn({ method: "GET" })
     if (!profile) return [];
     const sql = await getSql();
     const ciudad = profile.role === "gerencia" ? (profile.ciudad_vista ?? 0) : (profile.ciudad_id ?? 1);
+    if (fecha === hoyBogota()) {
+      const { refrescarBitacoraDia } = await import("./callcenter.functions");
+      const gente = veElEquipo(profile.role)
+        ? await sql.query<{ user_id: string; slug: string }>(
+            `select user_id, slug from profiles where role in ('asesor', 'lider') and coalesce(ciudad_id, 1) = $1`,
+            [ciudad],
+          )
+        : [{ user_id: profile.user_id, slug: profile.slug }];
+      for (const persona of gente) {
+        try {
+          await refrescarBitacoraDia(sql, persona.user_id, ciudad, persona.slug, fecha);
+        } catch {
+          /* una bitácora no debe tumbar la lista */
+        }
+      }
+    }
     const equipo = veElEquipo(profile.role);
     const rows = await sql.query<{
       owner_id: string;
@@ -51,9 +67,10 @@ export const listBitacoras = createServerFn({ method: "GET" })
       detalle_calle: string;
       trabas: string;
       manana: string;
+      enviada: number;
     }>(
       `select b.owner_id, p.name as owner_name, p.slug, b.fecha, b.modo, b.zonas,
-              b.llamadas, b.visitas, b.dijo_si, b.polizas, b.que_hizo, b.detalle_call, b.detalle_calle, b.trabas, b.manana
+              b.llamadas, b.visitas, b.dijo_si, b.polizas, b.que_hizo, b.detalle_call, b.detalle_calle, b.trabas, b.manana, b.enviada
        from bitacoras b
        join profiles p on p.user_id = b.owner_id
        where b.fecha = $1 and ($2::boolean or b.owner_id = $3) and coalesce(p.ciudad_id, 1) = $4
@@ -76,6 +93,7 @@ export const listBitacoras = createServerFn({ method: "GET" })
       detalleCalle: row.detalle_calle,
       trabas: row.trabas,
       manana: row.manana,
+      enviada: Number(row.enviada) === 1,
     }));
   });
 
@@ -107,9 +125,10 @@ export const listBitacorasRango = createServerFn({ method: "GET" })
       detalle_calle: string;
       trabas: string;
       manana: string;
+      enviada: number;
     }>(
       `select b.owner_id, p.name as owner_name, p.slug, b.fecha, b.modo, b.zonas,
-              b.llamadas, b.visitas, b.dijo_si, b.polizas, b.que_hizo, b.detalle_call, b.detalle_calle, b.trabas, b.manana
+              b.llamadas, b.visitas, b.dijo_si, b.polizas, b.que_hizo, b.detalle_call, b.detalle_calle, b.trabas, b.manana, b.enviada
        from bitacoras b
        join profiles p on p.user_id = b.owner_id
        where b.fecha >= $1 and b.fecha <= $2
@@ -132,11 +151,12 @@ export const listBitacorasRango = createServerFn({ method: "GET" })
       detalleCalle: row.detalle_calle,
       trabas: row.trabas,
       manana: row.manana,
+      enviada: Number(row.enviada) === 1,
     }));
   });
 
 export const guardarBitacora = createServerFn({ method: "POST" })
-  .validator((input: BitacoraDraft) => ({
+  .validator((input: BitacoraDraft & { definitiva?: boolean }) => ({
     ...input,
     fecha: fechaDe(input.fecha),
     modo: modoDe(input.modo),
@@ -150,6 +170,7 @@ export const guardarBitacora = createServerFn({ method: "POST" })
     detalleCalle: texto(input.detalleCalle, 2000),
     trabas: texto(input.trabas, 1000),
     manana: texto(input.manana, 1000),
+    definitiva: input.definitiva === true,
   }))
   .middleware([authMiddleware])
   .handler(async ({ context, data }) => {
@@ -164,8 +185,8 @@ export const guardarBitacora = createServerFn({ method: "POST" })
     );
     await sql.query(
       `insert into bitacoras (
-         owner_id, fecha, modo, zonas, llamadas, visitas, dijo_si, polizas, que_hizo, detalle_call, detalle_calle, trabas, manana, updated_at
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
+         owner_id, fecha, modo, zonas, llamadas, visitas, dijo_si, polizas, que_hizo, detalle_call, detalle_calle, trabas, manana, updated_at, editada, enviada
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), 1, $14)
        on conflict (owner_id, fecha) do update set
          modo = excluded.modo,
          zonas = excluded.zonas,
@@ -178,6 +199,8 @@ export const guardarBitacora = createServerFn({ method: "POST" })
          detalle_calle = excluded.detalle_calle,
          trabas = excluded.trabas,
          manana = excluded.manana,
+         editada = 1,
+         enviada = case when $14 = 1 then 1 else bitacoras.enviada end,
          updated_at = now()`,
       [
         context.userId,
@@ -193,6 +216,7 @@ export const guardarBitacora = createServerFn({ method: "POST" })
         data.detalleCalle,
         data.trabas,
         data.manana,
+        data.definitiva ? 1 : 0,
       ],
     );
     const previa = previas[0];

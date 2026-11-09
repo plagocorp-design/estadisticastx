@@ -36,6 +36,82 @@
 }
 .rise { animation: rise 220ms ease-out; }
 
+.taxi-escena {
+  position: relative;
+  height: 220px;
+  margin-top: auto;
+  overflow: hidden;
+}
+.taxi-escena-lienzo { position: relative; height: 100%; }
+.taxi-via {
+  position: absolute;
+  right: 0;
+  bottom: 14px;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28), transparent);
+}
+.taxi-auto {
+  position: absolute;
+  bottom: 10px;
+  z-index: 1;
+  width: min(680px, 100%);
+  animation: taxi-ruta 14s linear infinite;
+}
+.taxi-confeti { position: absolute; bottom: 78%; left: 42%; z-index: 3; width: 0; height: 0; }
+.taxi-confeti i {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: taxi-confeti 14s ease-out infinite;
+}
+.taxi-rueda {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: taxi-rueda 14s linear infinite;
+}
+.taxi-luz { animation: taxi-luz 14s linear infinite; }
+
+@keyframes taxi-ruta {
+  0% { left: -78%; }
+  22% { left: 0; }
+  30% { left: 2%; }
+  64% { left: 2%; }
+  76% { left: 16%; }
+  100% { left: 108%; }
+}
+@keyframes taxi-rueda {
+  0% { transform: rotate(0deg); }
+  30% { transform: rotate(680deg); }
+  64% { transform: rotate(680deg); }
+  100% { transform: rotate(1320deg); }
+}
+@keyframes taxi-pasajero {
+  0%, 20% { opacity: 1; transform: translateX(18px); }
+  40% { opacity: 1; transform: translateX(-28px); }
+  52% { opacity: 0; transform: translateX(-64px) scale(0.9); }
+  100% { opacity: 0; transform: translateX(-64px) scale(0.9); }
+}
+@keyframes taxi-paso {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes taxi-confeti {
+  0%, 40% { opacity: 0; transform: translate(0, 8px) rotate(0deg); }
+  48% { opacity: 1; }
+  66%, 100% { opacity: 0; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
+}
+@keyframes taxi-luz {
+  0%, 18% { opacity: 0.9; }
+  30%, 62% { opacity: 0.15; }
+  74%, 100% { opacity: 0.9; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rise { animation: none; }
+  .rise, .taxi-auto, .taxi-pasajero, .taxi-paso, .taxi-rueda, .taxi-confeti i, .taxi-luz { animation: none; }
+  .taxi-auto { left: 2%; }
+  .taxi-pasajero { opacity: 1; transform: none; }
+  .taxi-confeti { display: none; }
 }

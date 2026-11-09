@@ -279,6 +279,13 @@ export function ConfigPiloto({ edita, onAbrir }: { edita: boolean; onAbrir?: (id
   );
 }
 
+function documentoDeEstaParte(tipo: string, tipos: string[]) {
+  if (tipos.includes(tipo)) return true;
+  if (tipo.startsWith("cedula") && tipos.some((item) => item.startsWith("cedula"))) return true;
+  if (tipo.startsWith("tarjeta_propiedad") && tipos.some((item) => item.startsWith("tarjeta_propiedad"))) return true;
+  return false;
+}
+
 export function BloquePiloto({
   caso,
   rol,
@@ -289,6 +296,7 @@ export function BloquePiloto({
   onError,
   soloDocs = false,
   soloTipos,
+  nombresDocs,
 }: {
   caso: Caso;
   rol: string;
@@ -299,6 +307,7 @@ export function BloquePiloto({
   onError: (msg: string) => void;
   soloDocs?: boolean;
   soloTipos?: string[];
+  nombresDocs?: Record<string, string>;
 }) {
   const [docs, setDocs] = useState<DocItem[]>([]);
   const [tipo, setTipo] = useState("cedula");
@@ -321,17 +330,18 @@ export function BloquePiloto({
   const [textoOperativa, setTextoOperativa] = useState("Enviar a operativa");
   const [textoPago, setTextoPago] = useState("");
   const tiposSubida = (soloTipos ?? DOCS_PILOTO.map((doc) => doc.id)).filter((id) => id !== "unificado");
-  const admiteExtra = !soloTipos || soloTipos.includes("cedula");
-  const opciones = [
-    ...DOCS_PILOTO.filter((doc) => doc.id !== "unificado" && tiposSubida.includes(doc.id)).map((doc) => ({
-      id: doc.id,
-      label: etiquetas[doc.id] || doc.label,
-    })),
-    ...Object.entries(etiquetas)
-      .filter(([id]) => admiteExtra && !DOCS_PILOTO.some((doc) => doc.id === id))
-      .map(([id, label]) => ({ id, label })),
-  ];
-  const docsVisibles = soloTipos ? docs.filter((doc) => soloTipos.includes(doc.tipo) || (admiteExtra && Boolean(etiquetas[doc.tipo]) && !DOCS_PILOTO.some((item) => item.id === doc.tipo))) : docs;
+  const nombreDe = (id: string) => nombresDocs?.[id] || etiquetas[id] || etiquetaDoc(id);
+  const opciones = tiposSubida.map((id) => ({ id, label: nombreDe(id) }));
+  if (!soloTipos) {
+    for (const [id, label] of Object.entries(etiquetas)) {
+      if (id !== "unificado" && !opciones.some((doc) => doc.id === id)) opciones.push({ id, label });
+    }
+  }
+  const docsVisibles = soloTipos ? docs.filter((doc) => documentoDeEstaParte(doc.tipo, soloTipos)) : docs;
+  useEffect(() => {
+    if (opciones.length && !opciones.some((doc) => doc.id === tipo)) setTipo(opciones[0].id);
+  }, [opciones.map((doc) => doc.id).join("|")]);
+
   const lider = configura(rol);
   const asesor = llevaProcesos(rol);
   const sube = lider || (asesor && !esBandeja(rol));
@@ -677,7 +687,7 @@ export function BloquePiloto({
             {docsVisibles.map((doc) => (
               <li key={doc.id} className="grid gap-1 rounded-2xl border border-line bg-card px-3 py-2 text-sm">
                 <button type="button" className="text-left font-semibold text-navy" onClick={() => void correr(() => abrir(doc))}>
-                  {etiquetaDoc(doc.tipo)} · {doc.nombre}
+                  {nombreDe(doc.tipo)} · {doc.nombre}
                 </button>
                 <span className="text-ink-soft">
                   {doc.cuando}

@@ -100,6 +100,7 @@ function tipoTexto(value: string) {
   if (value === "visita") return "Visita";
   if (value === "llamada") return "Llamada";
   if (value === "escribir") return "Escribir";
+  if (value === "distintivos") return "Distintivos";
   return "Otro";
 }
 
@@ -161,6 +162,7 @@ function tipoDe(value: string): TipoAgenda {
   if (p.startsWith("visit")) return "visita";
   if (p.startsWith("llam")) return "llamada";
   if (p.startsWith("escrib")) return "escribir";
+  if (p.startsWith("distintiv")) return "distintivos";
   if (esTipoAgenda(p)) return p;
   return "otro";
 }

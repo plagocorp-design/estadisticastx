@@ -91,7 +91,7 @@ export function docsDe(value: unknown) {
   return String(value ?? "")
     .split(",")
     .map((item) => item.trim())
-    .filter((item) => DOC_IDS.has(item));
+    .filter((item) => DOC_IDS.has(item) || /^[a-z0-9_]{2,40}$/.test(item));
 }
 
 export function etiquetaDoc(id: string) {

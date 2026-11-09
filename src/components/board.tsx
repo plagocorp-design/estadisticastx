@@ -8,6 +8,7 @@ import { AgendaView } from "@/components/agenda";
 import { ChatCaso } from "@/components/chat-caso";
 import { BitacoraVista } from "@/components/bitacora";
 import { ControlVista } from "@/components/control";
+import { CallCenterVista } from "@/components/callcenter";
 import { EquipoVista, MiClave } from "@/components/equipo";
 import { AuditoriaVista } from "@/components/auditoria";
 import { cuando } from "@/lib/auditoria";
@@ -59,16 +60,34 @@ import {
   type CasoDraft,
   type StepKey,
 } from "@/lib/casos";
-import { ASESORES, configura, esBandeja, esGerencia, etiquetaRol, llevaProcesos, nombreLista, veElEquipo } from "@/lib/team.public";
+import { ASESORES, accesoDe, configura, esBandeja, esGerencia, etiquetaRol, llevaProcesos, nombreLista, veElEquipo } from "@/lib/team.public";
 import { BloquePiloto } from "@/components/piloto";
 import { GerenciaVista } from "@/components/gerencia";
 import { configMia, entrarCiudad, leerPasosExtra, marcarPasoExtra, salirCiudad } from "@/lib/gerencia.functions";
+import { consultarTarjeta, type EstadoTarjetaOficial } from "@/lib/tarjeta.functions";
 import { estadoPiloto, pasarMano } from "@/lib/piloto.functions";
 import { etiquetaMarca, marcasDe } from "@/lib/piloto";
 import { buscarEmpresas, unificarEmpresa } from "@/lib/empresas";
 
 const GRUPOS = ["Inicio", "Documentos", "Firma", "Póliza", "Tarjeta"] as const;
 const TARJETAS = ["Pendiente", "Radicada", "Expedida"] as const;
+
+function grupoAsesor(valor: string) {
+  const limpio = valor
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (limpio.startsWith("inic")) return "Inicio";
+  if (limpio.startsWith("doc")) return "Documentos";
+  if (limpio.startsWith("firm")) return "Firma";
+  if (limpio.startsWith("pol")) return "Póliza";
+  if (limpio.startsWith("tarj")) return "Tarjeta";
+  if (limpio.startsWith("oper")) return "Operativa";
+  if (limpio.startsWith("via")) return "Vía Seguros";
+  if (limpio.startsWith("serv")) return "Servicio";
+  return "Documentos";
+}
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
 type Filtro = "curso" | "nuevo" | "dijo" | "docs" | "firma" | "poliza" | "operativa" | "entregada" | "listo" | "cerrado" | "todos";
@@ -136,7 +155,7 @@ export function Board() {
   const [exportando, setExportando] = useState(false);
   const [archivos, setArchivos] = useState(false);
   const [mas, setMas] = useState(false);
-  const [vista, setVista] = useState<"procesos" | "agenda" | "meta" | "bitacora" | "control" | "equipo" | "auditoria">("procesos");
+  const [vista, setVista] = useState<"procesos" | "agenda" | "meta" | "bitacora" | "control" | "llamadas" | "equipo" | "auditoria">("procesos");
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [chats, setChats] = useState<Record<number, ChatResumen>>({});
   const [soloMensajes, setSoloMensajes] = useState(false);
@@ -243,6 +262,12 @@ export function Board() {
     };
   }, [me]);
 
+  useEffect(() => {
+    if (!me) return;
+    const permitidas = accesoDe(me.role, me.acceso).secciones;
+    if (!permitidas.includes(vista)) setVista((permitidas[0] as typeof vista) || "procesos");
+  }, [me, vista]);
+
   const delEquipo = veElEquipo(me?.role);
   const soyDavid = configura(me?.role);
   const bandeja = esBandeja(me?.role);
@@ -286,7 +311,7 @@ export function Board() {
       if (hilo.sinLeer <= 0) return [];
       return [{ caso: c, hilo }];
     })
-    .sort((a, b) => b.hilo.sinLeer - a.hilo.sinLeer || a.caso.placa.localeCompare(b.caso.placa));
+    .sort((a, b) => Number(b.hilo.urgente) - Number(a.hilo.urgente) || b.hilo.sinLeer - a.hilo.sinLeer || a.caso.placa.localeCompare(b.caso.placa));
 
   function refrescarChat() {
     resumenChat()
@@ -421,6 +446,7 @@ export function Board() {
       : delEquipo
         ? "Coordinación. Ves a cada asesor, sin configurar."
         : "Tus procesos, tu agenda y tu bitácora.";
+  const accesoMio = accesoDe(me.role, me.acceso);
   const secciones = [
         { id: "procesos" as const, label: "Procesos", icon: LayoutList, n: sinLeerNav, alerta: false },
         { id: "agenda" as const, label: "Agenda", icon: CalendarDays, n: hoyAgenda.length, alerta: false },
@@ -433,12 +459,10 @@ export function Board() {
           alerta: tarde && faltanVisibles.length > 0,
         },
         { id: "control" as const, label: "Control", icon: Clock, n: 0, alerta: false },
+        { id: "llamadas" as const, label: "Llamar", icon: Phone, n: 0, alerta: false },
         { id: "equipo" as const, label: "Equipo", icon: Users, n: 0, alerta: false },
         { id: "auditoria" as const, label: "Registro", icon: ScrollText, n: 0, alerta: false },
-      ].filter((item) => {
-        if (bandeja) return item.id === "procesos";
-        return (item.id !== "equipo" && item.id !== "auditoria") || miraEquipo;
-      });
+      ].filter((item) => accesoMio.secciones.includes(item.id));
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
@@ -744,12 +768,24 @@ export function Board() {
           </button>
         ) : null}
 
-        {vista === "equipo" && miraEquipo ? (
+        {vista === "equipo" ? (
           <EquipoVista edita={soyDavid} />
-        ) : vista === "auditoria" && miraEquipo ? (
+        ) : vista === "auditoria" ? (
           <AuditoriaVista veClaves={soyDavid} />
         ) : vista === "control" ? (
           <ControlVista me={me} hora={hora} hoy={hoy} verEquipo={miraEquipo} casos={casos} />
+        ) : vista === "llamadas" ? (
+          <CallCenterVista
+            key={miraEquipo ? "equipo" : "mio"}
+            me={me}
+            verEquipo={miraEquipo}
+            onProceso={(id) => {
+              void load().then((rows) => {
+                setVista("procesos");
+                setOpen(rows.find((c) => c.id === id) ?? null);
+              });
+            }}
+          />
         ) : vista === "bitacora" ? (
           <BitacoraVista
             me={me}
@@ -842,8 +878,8 @@ export function Board() {
                             {miraEquipo ? ` · ${c.ownerName.split(" ")[0]}` : ""}
                           </span>
                         </span>
-                        <span className="shrink-0 rounded-full bg-lime px-3 py-1 text-xs font-semibold text-navy">
-                          {chats[c.id]?.sinLeer} sin leer
+                        <span className={"shrink-0 rounded-full px-3 py-1 text-xs font-semibold " + (chats[c.id]?.urgente ? "bg-danger text-paper" : "bg-lime text-navy")}>
+                          {chats[c.id]?.urgente ? "Urgente" : `${chats[c.id]?.sinLeer} sin leer`}
                         </span>
                       </button>
                     </li>
@@ -1045,10 +1081,7 @@ export function Board() {
         )}
       </main>
       {bandeja ? null : (
-      <nav
-        className="fixed inset-x-0 bottom-0 z-20 grid border-t border-line bg-card lg:hidden"
-        style={{ gridTemplateColumns: `repeat(${secciones.length}, minmax(0, 1fr))` }}
-      >
+      <nav className="fixed inset-x-0 bottom-0 z-20 flex overflow-x-auto border-t border-line bg-card lg:hidden">
         {secciones.map((item) => {
           const Icon = item.icon;
           const on = vista === item.id;
@@ -1057,7 +1090,7 @@ export function Board() {
               key={item.id}
               type="button"
               onClick={() => setVista(item.id)}
-              className={"flex h-16 flex-col items-center justify-center gap-1 text-xs font-semibold " + (on ? "text-navy" : item.alerta ? "text-danger" : "text-ink-soft")}
+              className={"flex h-16 min-w-16 shrink-0 flex-col items-center justify-center gap-1 px-3 text-xs font-semibold whitespace-nowrap " + (on ? "text-navy" : item.alerta ? "text-danger" : "text-ink-soft")}
             >
               <Icon className="size-5" />
               {item.label}
@@ -1159,8 +1192,8 @@ export function Board() {
                             {delEquipo ? ` · ${caso.ownerName.split(" ")[0]}` : ""}
                           </span>
                         </span>
-                        <span className="shrink-0 rounded-full bg-lime px-3 py-1 text-xs font-semibold text-navy">
-                          {hilo.sinLeer} sin leer
+                        <span className={"shrink-0 rounded-full px-3 py-1 text-xs font-semibold " + (hilo.urgente ? "bg-danger text-paper" : "bg-lime text-navy")}>
+                          {hilo.urgente ? "Urgente" : `${hilo.sinLeer} sin leer`}
                         </span>
                       </button>
                     </li>
@@ -1493,8 +1526,9 @@ function Panel({
   pdfRef.current = { pdf: pdfNuevo, nombre: nombrePdf };
   const vivo = form ? conAvance(form) : null;
   const [pasosCfg, setPasosCfg] = useState<Record<string, { label: string; activo: boolean }>>({});
-  const [docsCfg, setDocsCfg] = useState<{ id: string; activo: boolean; parte?: string }[]>([]);
-  const [extras, setExtras] = useState<{ key: string; label: string }[]>([]);
+  const [docsCfg, setDocsCfg] = useState<{ id: string; label: string; activo: boolean; parte?: string }[]>([]);
+  const [extras, setExtras] = useState<{ key: string; label: string; grupo: string }[]>([]);
+  const [configLista, setConfigLista] = useState(false);
   const [marcasExtra, setMarcasExtra] = useState<Record<string, boolean>>({});
   useEffect(() => {
     configMia()
@@ -1502,10 +1536,19 @@ function Panel({
         const mapa: Record<string, { label: string; activo: boolean }> = {};
         for (const paso of conf.pasos) mapa[paso.key] = { label: paso.label, activo: paso.activo };
         setPasosCfg(mapa);
-        setDocsCfg(conf.documentos);
-        setExtras(conf.pasos.filter((paso) => paso.activo && !STEPS.some((item) => item.key === paso.key) && !["Operativa", "Vía Seguros", "Servicio"].includes(paso.grupo)));
+        setDocsCfg(conf.documentos.map((doc) => ({ id: doc.id, label: doc.label, activo: doc.activo, parte: doc.parte })));
+        setExtras(
+          conf.pasos
+            .filter((paso) => paso.activo && !STEPS.some((item) => item.key === paso.key) && !["Operativa", "Vía Seguros", "Servicio"].includes(grupoAsesor(paso.grupo)))
+            .map((paso) => ({
+              key: paso.key,
+              label: paso.label,
+              grupo: grupoAsesor(paso.grupo),
+            })),
+        );
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setConfigLista(true));
   }, []);
   useEffect(() => {
     if (!form?.id) return;
@@ -1969,12 +2012,15 @@ function Panel({
             ? ["poliza", "comprobante"]
             : [];
     }
-    const base = docsCfg.filter((doc) => doc.activo && (doc.parte || "Documentos") === parte).map((doc) => doc.id);
-    const extra: string[] = [];
-    if (parte === "Documentos" && base.length) extra.push("unificado");
-    if (base.includes("cedula")) extra.push("cedula_frente", "cedula_reverso");
-    if (base.includes("tarjeta_propiedad")) extra.push("tarjeta_propiedad_frente", "tarjeta_propiedad_reverso");
-    return [...new Set([...base, ...extra])];
+    const base = docsCfg.filter((doc) => doc.activo && grupoAsesor(doc.parte || "Documentos") === parte).map((doc) => doc.id);
+    const salida: string[] = [];
+    if (parte === "Documentos" && base.length) salida.push("unificado");
+    for (const id of base) {
+      if (id === "cedula") salida.push("cedula_frente", "cedula_reverso");
+      else if (id === "tarjeta_propiedad") salida.push("tarjeta_propiedad_frente", "tarjeta_propiedad_reverso");
+      else salida.push(id);
+    }
+    return [...new Set(salida)];
   }
 
   return (
@@ -2094,6 +2140,7 @@ function Panel({
                 <ChatCaso casoId={form.id} duenoId={form.ownerId} yo={yo} delEquipo={delEquipo} onCambio={onChat} />
               ) : null}
               {pestana === "documentos" ? (
+              configLista ? (
               <BloquePiloto
                 caso={form}
                 rol={rol}
@@ -2101,6 +2148,7 @@ function Panel({
                 activo
                 soloDocs
                 soloTipos={tiposParte("Documentos")}
+                nombresDocs={Object.fromEntries(docsCfg.map((doc) => [doc.id, doc.label]))}
                 onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))}
                 onListo={() => {
                   onChat();
@@ -2108,12 +2156,15 @@ function Panel({
                 }}
                 onError={onError}
               />
+              ) : (
+                <p className="text-sm text-ink-soft">Cargando los documentos de esta ciudad…</p>
+              )
               ) : null}
               {pestana === "firma" && tiposParte("Firma").length ? (
-                <BloquePiloto caso={form} rol={rol} miSlug={miSlug} activo soloDocs soloTipos={tiposParte("Firma")} onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} onListo={() => { onChat(); void onSaved(); }} onError={onError} />
+                <BloquePiloto caso={form} rol={rol} miSlug={miSlug} activo soloDocs soloTipos={tiposParte("Firma")} nombresDocs={Object.fromEntries(docsCfg.map((doc) => [doc.id, doc.label]))} onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} onListo={() => { onChat(); void onSaved(); }} onError={onError} />
               ) : null}
               {pestana === "poliza" && tiposParte("Póliza").length ? (
-                <BloquePiloto caso={form} rol={rol} miSlug={miSlug} activo soloDocs soloTipos={tiposParte("Póliza")} onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} onListo={() => { onChat(); void onSaved(); }} onError={onError} />
+                <BloquePiloto caso={form} rol={rol} miSlug={miSlug} activo soloDocs soloTipos={tiposParte("Póliza")} nombresDocs={Object.fromEntries(docsCfg.map((doc) => [doc.id, doc.label]))} onCaso={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} onListo={() => { onChat(); void onSaved(); }} onError={onError} />
               ) : null}
               {pestana === "inicio" || pestana === "firma" ? (
               <div className="grid content-start gap-3">
@@ -2280,8 +2331,10 @@ function Panel({
                 </p>
               ) : null}
               {pestana === "tarjeta" ? (
-                <div>
-                  <p className="text-sm font-medium">Estado de la tarjeta</p>
+                <div className="grid gap-3">
+                  <EstadoIntranet placa={form.placa} />
+                  <div>
+                  <p className="text-sm font-medium">Lo que marcamos nosotros</p>
                   <div className="mt-2 grid grid-cols-3 gap-2">
                     {TARJETAS.map((t) => {
                       const on = form.estadoTarjeta === t;
@@ -2299,6 +2352,7 @@ function Panel({
                         </button>
                       );
                     })}
+                  </div>
                   </div>
                 </div>
               ) : null}
@@ -2322,34 +2376,14 @@ function Panel({
                 </>
               ) : null}
               <div className="order-first grid content-start gap-4">
-                {pestana === "inicio" && extras.length > 0 ? (
-                  <fieldset>
-                    <legend className="mb-2 text-xs font-semibold tracking-wide text-ink-soft uppercase">Agregados por gerencia</legend>
-                    <div className="grid gap-2">
-                      {extras.map((paso) => (
-                        <button
-                          key={paso.key}
-                          type="button"
-                          disabled={!canEdit}
-                          onClick={() => {
-                            const on = !marcasExtra[paso.key];
-                            setMarcasExtra((actual) => ({ ...actual, [paso.key]: on }));
-                            void marcarPasoExtra({ data: { casoId: form.id, paso: paso.key, on } });
-                          }}
-                          className={"flex h-11 items-center gap-2 rounded-2xl border px-3 text-left text-sm font-semibold " + (marcasExtra[paso.key] ? "border-navy bg-navy text-paper" : "border-line")}
-                        >
-                          {marcasExtra[paso.key] ? "Sí" : "No"} {paso.label}
-                        </button>
-                      ))}
-                    </div>
-                  </fieldset>
-                ) : null}
                 {grupos.filter(({ g }) => g === (pestana === "inicio" ? "Inicio" : pestana === "documentos" ? "Documentos" : pestana === "firma" ? "Firma" : pestana === "poliza" ? "Póliza" : pestana === "tarjeta" ? "Tarjeta" : "")).map(({ g, steps }) => {
-                  const listos = steps.filter((s) => form[s.key]).length;
+                  const delGrupo = extras.filter((paso) => paso.grupo === g);
+                  if (!steps.length && !delGrupo.length) return null;
+                  const listos = steps.filter((s) => form[s.key]).length + delGrupo.filter((paso) => marcasExtra[paso.key]).length;
                   return (
                     <fieldset key={g}>
                       <legend className="mb-2 text-xs font-semibold tracking-wide text-ink-soft uppercase">
-                        {g} · {listos}/{steps.length}
+                        {g} · {listos}/{steps.length + delGrupo.length}
                       </legend>
                       <div className="grid gap-2">
                         {steps.map((step) => {
@@ -2377,6 +2411,36 @@ function Panel({
                                 {on ? "Sí" : "No"}
                               </span>
                               {step.label}
+                            </button>
+                          );
+                        })}
+                        {delGrupo.map((paso) => {
+                          const on = Boolean(marcasExtra[paso.key]);
+                          return (
+                            <button
+                              key={paso.key}
+                              type="button"
+                              disabled={!canEdit}
+                              aria-pressed={on}
+                              onClick={() => {
+                                const siguiente = !on;
+                                setMarcasExtra((actual) => ({ ...actual, [paso.key]: siguiente }));
+                                void marcarPasoExtra({ data: { casoId: form.id, paso: paso.key, on: siguiente } });
+                              }}
+                              className={
+                                "flex min-h-11 items-center gap-3 rounded-2xl border px-3 text-left text-sm " +
+                                (on ? "border-navy bg-navy text-paper" : "border-line")
+                              }
+                            >
+                              <span
+                                className={
+                                  "grid h-6 w-8 place-items-center rounded-md text-xs font-bold " +
+                                  (on ? "bg-lime text-navy" : "bg-paper text-ink-soft")
+                                }
+                              >
+                                {on ? "Sí" : "No"}
+                              </span>
+                              {paso.label}
                             </button>
                           );
                         })}
@@ -2934,5 +2998,54 @@ function Field({
         className="mt-1 h-11 w-full rounded-2xl border border-line px-3"
       />
     </label>
+  );
+}
+
+function EstadoIntranet({ placa }: { placa: string }) {
+  const [dato, setDato] = useState<EstadoTarjetaOficial | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function consultar() {
+    const limpia = placa.trim();
+    if (limpia.length < 5) {
+      setDato({ ok: false, estado: "", detalle: "Falta la placa para consultar.", bloqueo: "" });
+      return;
+    }
+    setBusy(true);
+    try {
+      setDato(await consultarTarjeta({ data: limpia }));
+    } catch {
+      setDato({ ok: false, estado: "Sin respuesta", detalle: "No pude consultar la intranet de Taxis Libres.", bloqueo: "" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void consultar();
+  }, [placa]);
+
+  const tono = dato?.estado === "Entregada" ? "bg-lime text-ink" : dato?.ok ? "bg-navy text-paper" : "bg-paper text-ink";
+
+  return (
+    <div className="rounded-2xl border border-line p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Intranet de Taxis Libres</p>
+        <button type="button" onClick={() => void consultar()} disabled={busy} className="h-9 rounded-xl border border-line px-3 text-sm font-semibold disabled:opacity-60">
+          {busy ? "Consultando…" : "Consultar"}
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-ink-soft">Así va la tarjeta de {placa || "esta placa"} en la intranet de Taxis Libres.</p>
+      {dato ? (
+        <div className={"mt-3 rounded-2xl px-3 py-3 " + tono}>
+          <p className="text-xs font-semibold uppercase tracking-wide opacity-80">Así va</p>
+          <p className="text-lg font-semibold">{dato.estado || "Sin estado"}</p>
+          {dato.detalle && dato.detalle !== dato.estado ? <p className="mt-1 text-sm">{dato.detalle}</p> : null}
+          {dato.bloqueo ? <p className="mt-1 text-sm">Bloqueo: {dato.bloqueo}</p> : null}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-ink-soft">Consultando…</p>
+      )}
+    </div>
   );
 }

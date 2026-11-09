@@ -2,6 +2,7 @@ export const TIPOS_AGENDA = [
   { id: "visita", label: "Visita" },
   { id: "llamada", label: "Llamar" },
   { id: "escribir", label: "Escribir" },
+  { id: "distintivos", label: "Distintivos" },
   { id: "otro", label: "Otra" },
 ] as const;
 
@@ -21,6 +22,10 @@ export type AgendaItem = {
   hora: string;
   nota: string;
   hecho: boolean;
+  conductor: string;
+  cedula: string;
+  promotor: string;
+  estado: string;
 };
 
 export type AgendaDraft = {
@@ -33,6 +38,11 @@ export type AgendaDraft = {
   casoId: number | null;
   hecho?: boolean;
   ownerSlug?: string;
+  placaLibre?: string;
+  conductor?: string;
+  cedula?: string;
+  promotor?: string;
+  estado?: string;
 };
 
 const TIPOS = new Set<string>(TIPOS_AGENDA.map((t) => t.id));
@@ -44,6 +54,13 @@ export function esTipoAgenda(value: string): value is TipoAgenda {
 export function etiquetaTipo(tipo: TipoAgenda) {
   return TIPOS_AGENDA.find((t) => t.id === tipo)?.label ?? "Otra";
 }
+
+export const HORAS_DISTINTIVO = Array.from({ length: 14 }, (_, i) => {
+  const min = 10 * 60 + i * 30;
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+});
+
+export const HASTA_DISTINTIVOS = "2026-12-31";
 
 export function diasDelMes(year: number, month: number) {
   const first = new Date(Date.UTC(year, month - 1, 1));

@@ -3,13 +3,13 @@ import { Mic } from "lucide-react";
 import { guardarBitacora, listBitacoras } from "@/lib/bitacora.functions";
 import {
   bitacoraHecha,
-  etiquetaModo,
   MODOS,
   type Bitacora,
   type BitacoraDraft,
   type ModoBitacora,
 } from "@/lib/bitacora";
 import { ASESORES, llevaProcesos, veElEquipo } from "@/lib/team.public";
+import { META_LLAMADAS } from "@/lib/callcenter";
 import type { Me } from "@/lib/casos.functions";
 
 const VACIO: Omit<BitacoraDraft, "fecha"> = {
@@ -178,6 +178,7 @@ export function BitacoraVista({
   const [fecha, setFecha] = useState(hoy);
   const [filas, setFilas] = useState<Bitacora[]>([]);
   const [form, setForm] = useState<Omit<BitacoraDraft, "fecha">>(VACIO);
+  const [enviada, setEnviada] = useState(false);
   const [aviso, setAviso] = useState("");
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
@@ -188,7 +189,11 @@ export function BitacoraVista({
       .then((rows) => {
         if (!vivo) return;
         setFilas(rows);
-        if (escribe) setForm(deFila(rows.find((r) => r.ownerId === me.id)));
+        if (escribe) {
+          const mia = rows.find((r) => r.ownerId === me.id);
+          setForm(deFila(mia));
+          setEnviada(Boolean(mia?.enviada));
+        }
       })
       .catch(() => {
         if (vivo) setError("No pude cargar la bitácora.");
@@ -203,7 +208,7 @@ export function BitacoraVista({
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function guardar() {
+  async function guardar(definitiva = false) {
     if (!form.modo) {
       setError("Primero marca dónde estuviste.");
       return;
@@ -217,6 +222,7 @@ export function BitacoraVista({
       visitas: enCalle ? form.visitas : 0,
       detalleCall: enCall ? form.detalleCall : "",
       detalleCalle: enCalle ? form.detalleCalle : "",
+      definitiva,
     };
     setGuardando(true);
     setError("");
@@ -224,8 +230,10 @@ export function BitacoraVista({
       await guardarBitacora({ data });
       const rows = await listBitacoras({ data: fecha });
       setFilas(rows);
-      setForm(deFila(rows.find((r) => r.ownerId === me.id)));
-      setAviso("Quedó guardada. La puedes corregir cuando quieras.");
+      const mia = rows.find((r) => r.ownerId === me.id);
+      setForm(deFila(mia));
+      setEnviada(Boolean(mia?.enviada));
+      setAviso(definitiva ? "Definitiva enviada. Las llamadas nuevas ya no la reescriben." : "Cambios guardados. Puedes seguir corrigiendo antes de enviarla.");
       if (fecha === hoy) onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No pude guardar");
@@ -268,6 +276,11 @@ export function BitacoraVista({
       {escribe ? (
         <div className={"grid max-w-3xl gap-4 rounded-card border border-line bg-card p-4 " + (veTodos && verEquipo ? "order-2 mt-5" : "mt-4")}>
           <p className="text-sm font-semibold">{verEquipo ? "La tuya" : hoyVista ? "Hoy" : corta(fecha)}</p>
+          <p className="text-sm text-ink-soft">
+            {enviada
+              ? "Definitiva enviada. Si la corriges, vuelve a guardar."
+              : "Se arma sola con las tipificaciones del call. Revísala, cámbiala si hace falta y envía la definitiva."}
+          </p>
           <div>
             <p className="text-sm font-medium">Dónde estuviste</p>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -363,14 +376,24 @@ export function BitacoraVista({
           )}
           {error ? <p className="text-sm text-danger">{error}</p> : null}
           {aviso ? <p className="text-sm font-semibold text-navy">{aviso}</p> : null}
-          <button
-            type="button"
-            disabled={guardando}
-            onClick={() => void guardar()}
-            className="h-11 rounded-2xl bg-navy font-semibold text-paper disabled:opacity-60"
-          >
-            {guardando ? "Guardando…" : "Guardar bitácora"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={guardando}
+              onClick={() => void guardar(false)}
+              className="h-11 rounded-2xl border border-line px-4 font-semibold disabled:opacity-60"
+            >
+              {guardando ? "Guardando…" : "Guardar cambios"}
+            </button>
+            <button
+              type="button"
+              disabled={guardando || enviada}
+              onClick={() => void guardar(true)}
+              className="h-11 rounded-2xl bg-navy px-4 font-semibold text-paper disabled:opacity-60"
+            >
+              {enviada ? "Definitiva enviada" : "Enviar definitiva"}
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -394,7 +417,8 @@ export function BitacoraVista({
                       {asesor.role === "lider" ? " · líder" : ""}
                     </p>
                     <p className={"text-sm font-semibold " + (rojo ? "text-danger" : "text-ink-soft")}>
-                      {hecha ? etiquetaModo(row?.modo ?? "") : libre ? "Hoy no trabaja" : rojo ? "Falta la bitácora" : "Sin bitácora"}
+                      {(row?.llamadas ?? 0)} de {META_LLAMADAS}
+                      {row?.enviada ? " · definitiva" : hecha ? "" : libre ? " · no trabaja" : rojo ? " · falta" : ""}
                     </p>
                   </div>
                   {hecha && row ? (

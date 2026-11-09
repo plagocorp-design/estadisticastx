@@ -125,7 +125,7 @@ async function createPgliteSql(): Promise<Sql> {
   // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied
   // files are tracked in _migrations. The glob does not descend, so the opt-in
   // auth schema under migrations/auth/ stays out. A fresh module load applies
-  // any new file (cierre, bitácora, días de meta, control, marcas libres, entrega de póliza) — with
+  // any new file (cierre, bitácora, control, call center, distintivos en agenda) — with
   // passes serialized on a global chain so concurrent callers never
   // double-apply.
   const migrate = async (): Promise<void> => {

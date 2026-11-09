@@ -56,3 +56,76 @@ export function nombreLista(person: { name: string; role: string }) {
 }
 
 export const ASESORES = TEAM_PUBLIC.filter((p) => llevaProcesos(p.role));
+
+export const SECCIONES_APP = [
+  { id: "procesos", label: "Procesos" },
+  { id: "agenda", label: "Agenda" },
+  { id: "meta", label: "Meta" },
+  { id: "bitacora", label: "Bitácora" },
+  { id: "control", label: "Control" },
+  { id: "llamadas", label: "Llamar" },
+  { id: "equipo", label: "Equipo" },
+  { id: "auditoria", label: "Registro" },
+] as const;
+
+export const PODERES_APP = [
+  { id: "propios", label: "Lleva sus procesos, horario, meta y llamadas" },
+  { id: "ver_equipo", label: "Ve el trabajo de todo el equipo" },
+  { id: "configurar", label: "Configura: crea perfiles, claves, metas y tipificaciones" },
+] as const;
+
+export const AREAS_APP = [
+  { id: "", label: "Ninguna. No es de un área" },
+  { id: "via_seguros", label: "Vía Seguros" },
+  { id: "operativa", label: "Operativa" },
+  { id: "servicio", label: "Servicio al cliente" },
+] as const;
+
+export type Acceso = { secciones: string[]; poderes: string[]; area: string };
+
+const IDS_SECCION = new Set<string>(SECCIONES_APP.map((item) => item.id));
+const IDS_PODER = new Set<string>(PODERES_APP.map((item) => item.id));
+
+export function accesoVacio(): Acceso {
+  return {
+    secciones: ["procesos", "agenda", "meta", "bitacora", "control", "llamadas"],
+    poderes: ["propios"],
+    area: "",
+  };
+}
+
+export function accesoDe(role: string, raw?: string | null): Acceso {
+  if (raw && raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<Acceso>;
+      const secciones = Array.isArray(parsed.secciones) ? parsed.secciones.filter((id) => IDS_SECCION.has(id)) : [];
+      const poderes = Array.isArray(parsed.poderes) ? parsed.poderes.filter((id) => IDS_PODER.has(id)) : [];
+      const area = AREAS_APP.some((item) => item.id === parsed.area) ? String(parsed.area) : "";
+      if (secciones.length > 0) return { secciones, poderes, area };
+    } catch {
+      /* el texto viejo no cuenta */
+    }
+  }
+  if (role === "gerencia" || role === "lider") {
+    return { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["propios", "ver_equipo", "configurar"], area: "" };
+  }
+  if (role === "coordinadora") {
+    return { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["ver_equipo"], area: "" };
+  }
+  if (role === "via_seguros" || role === "operativa" || role === "servicio") {
+    return { secciones: ["procesos"], poderes: [], area: role };
+  }
+  return accesoVacio();
+}
+
+export function rolDeAcceso(acceso: Acceso): Role {
+  if (acceso.area === "via_seguros" || acceso.area === "operativa" || acceso.area === "servicio") return acceso.area;
+  if (acceso.poderes.includes("configurar")) return "lider";
+  if (acceso.poderes.includes("ver_equipo")) return "coordinadora";
+  return "asesor";
+}
+
+export function accesoJson(acceso: Acceso) {
+  const limpio = accesoDe(rolDeAcceso(acceso), JSON.stringify(acceso));
+  return JSON.stringify(limpio);
+}
