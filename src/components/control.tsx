@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { agregarMarca, borrarMarca, exportarControl, guardarTipo, listEquipo, listMarcas, listTipos, marcarControl, quitarTipo } from "@/lib/control.functions";
+import { agregarMarca, borrarMarca, claveExtension, exportarControl, guardarTipo, listEquipo, listMarcas, listTipos, marcarControl, quitarTipo } from "@/lib/control.functions";
 import {
   CUPO_MINUTOS,
   atencionesDe,
@@ -235,6 +235,7 @@ export function ControlVista({
           ? "Llegó y se fue son la entrada y la salida. Llamar se empieza y se termina como cualquier gestión. WhatsApp se puede al mismo tiempo. Break, almuerzo o un cliente pausan lo que esté abierto."
           : "Marca cuándo llegas y cuándo te vas. Llamar no queda abierto solo: lo empiezas y lo terminas. WhatsApp se puede al tiempo. Break y almuerzo también."}
       </p>
+      <ClaveWhatsapp />
       {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 
       {!verEquipo ? (
@@ -1062,4 +1063,34 @@ function textoAhora(marcas: MarcaControl[], tipos: TipoActividad[], slug: string
   else if (aviso && ahora.estado === "adentro") texto = `Adentro · ${aviso.charAt(0).toLowerCase()}${aviso.slice(1)}${junto ? ` · también ${junto}` : ""}`;
   else if (aviso) texto = aviso;
   return { ahora, base, aviso, texto };
+}
+
+function ClaveWhatsapp() {
+  const [token, setToken] = useState("");
+  const [aviso, setAviso] = useState("");
+  useEffect(() => {
+    claveExtension()
+      .then((dato) => setToken(dato.token))
+      .catch(() => setAviso("No pude leer la clave de la extensión."));
+  }, []);
+  return (
+    <details className="mt-3 max-w-2xl rounded-2xl border border-line bg-card px-4 py-3 text-sm">
+      <summary className="cursor-pointer font-semibold">Extensión de WhatsApp</summary>
+      <p className="mt-2 text-ink-soft">
+        Al abrir WhatsApp Web se marca la gestión en Control. Cada chat se cuenta desde el primer mensaje de hoy, aunque el chat sea viejo y todavía no tengas la placa ni el nombre. El verde es atendido y el rojo es que no se pudo. Los dos quedan guardados.
+      </p>
+      <p className="mt-2 break-all font-mono text-xs">{token || "…"}</p>
+      {aviso ? <p className="mt-2 text-danger">{aviso}</p> : null}
+      <button
+        type="button"
+        className="mt-2 h-10 rounded-2xl border border-line px-3 font-semibold"
+        onClick={() => {
+          void navigator.clipboard.writeText(token);
+          setAviso("Clave copiada. Pégala en la extensión, una sola vez.");
+        }}
+      >
+        Copiar clave
+      </button>
+    </details>
+  );
 }

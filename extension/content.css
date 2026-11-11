@@ -1,0 +1,22 @@
+#vincula-wa {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 99999;
+  width: 280px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #fff;
+  color: #14213d;
+  box-shadow: 0 10px 30px rgba(20, 33, 61, 0.2);
+  font: 13px/1.35 system-ui, sans-serif;
+}
+#vincula-wa h2 { margin: 0 0 6px; font-size: 14px; }
+#vincula-wa p { margin: 0 0 8px; color: #5c6578; }
+#vincula-wa label { display: block; margin-top: 6px; font-weight: 650; }
+#vincula-wa input { width: 100%; box-sizing: border-box; height: 32px; margin-top: 3px; border: 1px solid #d5d8e0; border-radius: 10px; padding: 0 8px; }
+#vincula-wa .botones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+#vincula-wa button { height: 36px; border: 0; border-radius: 10px; font-weight: 700; color: white; cursor: pointer; }
+#vincula-wa .verde { background: #1f7a4d; }
+#vincula-wa .rojo { background: #b42318; }
+#vincula-wa .estado { margin-top: 8px; }

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
@@ -1048,4 +1049,17 @@ export const resolverUsuario = createServerFn({ method: "POST" })
       [plano(data)],
     );
     return rows[0]?.email ?? "";
+  });
+
+export const claveExtension = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const sql = await getSql();
+    const rows = await sql.query<{ wa_token: string }>(`select wa_token from profiles where user_id = $1`, [context.userId]);
+    let token = rows[0]?.wa_token ?? "";
+    if (token.length < 16) {
+      token = randomBytes(18).toString("hex");
+      await sql.query(`update profiles set wa_token = $1 where user_id = $2`, [token, context.userId]);
+    }
+    return { token };
   });

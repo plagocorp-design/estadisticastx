@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Vincula Libre WhatsApp",
+  "version": "1.0.0",
+  "description": "Sube a Vincula Libre la gestión de WhatsApp del día.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://vincula-libre.vercel.app/*",
+    "https://*.vercel.app/*",
+    "https://*.grok.me/*",
+    "http://127.0.0.1:8080/*",
+    "http://localhost:8080/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Vincula Libre"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

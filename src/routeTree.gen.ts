@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as PilotoRouteImport } from './routes/piloto'
 import { Route as ApiDocusealRouteImport } from './routes/api/docuseal'
 import { Route as ApiSheetsRouteImport } from './routes/api/sheets'
+import { Route as ApiWaRouteImport } from './routes/api/wa'
 import { Route as FirmarTokenRouteImport } from './routes/firmar.$token'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -42,6 +43,11 @@ const ApiSheetsRoute = ApiSheetsRouteImport.update({
   path: '/api/sheets',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWaRoute = ApiWaRouteImport.update({
+  id: '/api/wa',
+  path: '/api/wa',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FirmarTokenRoute = FirmarTokenRouteImport.update({
   id: '/firmar/$token',
   path: '/firmar/$token',
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/piloto': typeof PilotoRoute
   '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
+  '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -68,6 +75,7 @@ export interface FileRoutesByTo {
   '/piloto': typeof PilotoRoute
   '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
+  '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -78,6 +86,7 @@ export interface FileRoutesById {
   '/piloto': typeof PilotoRoute
   '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
+  '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -89,6 +98,7 @@ export interface FileRouteTypes {
     | '/piloto'
     | '/api/docuseal'
     | '/api/sheets'
+    | '/api/wa'
     | '/firmar/$token'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
@@ -98,6 +108,7 @@ export interface FileRouteTypes {
     | '/piloto'
     | '/api/docuseal'
     | '/api/sheets'
+    | '/api/wa'
     | '/firmar/$token'
     | '/api/auth/$'
   id:
@@ -107,6 +118,7 @@ export interface FileRouteTypes {
     | '/piloto'
     | '/api/docuseal'
     | '/api/sheets'
+    | '/api/wa'
     | '/firmar/$token'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
@@ -117,6 +129,7 @@ export interface RootRouteChildren {
   PilotoRoute: typeof PilotoRoute
   ApiDocusealRoute: typeof ApiDocusealRoute
   ApiSheetsRoute: typeof ApiSheetsRoute
+  ApiWaRoute: typeof ApiWaRoute
   FirmarTokenRoute: typeof FirmarTokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSheetsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/wa': {
+      id: '/api/wa'
+      path: '/api/wa'
+      fullPath: '/api/wa'
+      preLoaderRoute: typeof ApiWaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/firmar/$token': {
       id: '/firmar/$token'
       path: '/firmar/$token'
@@ -181,6 +201,7 @@ const rootRouteChildren: RootRouteChildren = {
   PilotoRoute: PilotoRoute,
   ApiDocusealRoute: ApiDocusealRoute,
   ApiSheetsRoute: ApiSheetsRoute,
+  ApiWaRoute: ApiWaRoute,
   FirmarTokenRoute: FirmarTokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
