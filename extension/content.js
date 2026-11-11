@@ -103,7 +103,7 @@ function subir(color) {
       },
     },
     (respuesta) => {
-      estado.textContent = respuesta?.aviso || respuesta?.error || "No contestó el programa.";
+      estado.textContent = respuesta?.aviso || respuesta?.error || respuesta?.message || (chrome.runtime.lastError ? chrome.runtime.lastError.message : "") || "No contestó el programa.";
     },
   );
 }

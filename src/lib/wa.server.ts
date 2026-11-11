@@ -25,9 +25,20 @@ function horaDe(value: string) {
 }
 
 export async function recibirWhatsapp(cuerpo: Cuerpo | null) {
+  try {
+    return await guardar(cuerpo);
+  } catch (err) {
+    const texto = err instanceof Error ? err.message : "No pude guardar la gestión";
+    console.error("[wa]", texto);
+    return { ok: false, error: texto.slice(0, 220) };
+  }
+}
+
+async function guardar(cuerpo: Cuerpo | null) {
   const token = (cuerpo?.token ?? "").trim();
   if (token.length < 16) return { ok: false, error: "Falta la clave de la extensión" };
   const sql = await getSql();
+  await sql.query(`alter table profiles add column if not exists wa_token text not null default ''`);
   const gente = await sql.query<{ user_id: string; ciudad_id: number | null }>(
     `select user_id, ciudad_id from profiles where wa_token = $1`,
     [token],
