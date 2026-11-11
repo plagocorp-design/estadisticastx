@@ -719,7 +719,7 @@ function Antes({
             <input value={placaLibre} onChange={(e) => setPlacaLibre(e.target.value.toUpperCase())} placeholder="Placa, si la tiene" className="h-11 rounded-2xl border border-line px-3 text-sm uppercase" />
           ) : null}
           {tipo === "otro" || actividad ? (
-            <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder={tipo === "otro" ? "A dónde salió" : "Qué quedó, si quieres"} className="h-11 rounded-2xl border border-line px-3 text-sm" />
+            <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder={tipo === "otro" ? "A dónde salió" : "Observaciones"} className="h-11 rounded-2xl border border-line px-3 text-sm" />
           ) : null}
           {(tipo === "visita" || actividad?.pideProceso) && procesos.length > 0 ? (
             <select value={casoId ?? ""} onChange={(e) => setCasoId(e.target.value ? Number(e.target.value) : null)} className="h-11 rounded-2xl border border-line px-3 text-sm">
@@ -834,7 +834,7 @@ function FormaActividad({
           ))}
         </select>
       ) : null}
-      <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Qué quedó, si quieres" className="h-11 rounded-2xl border border-line px-3 text-sm" />
+      <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Observaciones" className="h-11 rounded-2xl border border-line px-3 text-sm" />
       <div className="flex gap-2">
         <button type="submit" disabled={ocupado} className="h-10 flex-1 rounded-2xl bg-navy text-sm font-semibold text-paper disabled:opacity-60">
           {abierta ? "Agregar esta persona" : tipo.paralela ? "Empezar, aunque falten datos" : "Empezar"}
@@ -1093,7 +1093,7 @@ function CompletarAtencion({
       <input value={contacto} onChange={(e) => setContacto(e.target.value)} placeholder="Nombre, si ya lo sabes" className="h-9 rounded-xl border border-line px-2 text-sm" />
       <input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Número, si ya lo tienes" className="h-9 rounded-xl border border-line px-2 text-sm" />
       <input value={placa} onChange={(e) => setPlaca(e.target.value.toUpperCase())} placeholder="Placa" className="h-9 rounded-xl border border-line px-2 text-sm uppercase" />
-      <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Qué quedó" className="h-9 rounded-xl border border-line px-2 text-sm" />
+      <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Observaciones" className="h-9 rounded-xl border border-line px-2 text-sm" />
       <div className="flex gap-2">
         <button type="submit" disabled={ocupado} className="h-8 rounded-xl bg-navy px-3 text-xs font-semibold text-paper disabled:opacity-60">
           Guardar dato
