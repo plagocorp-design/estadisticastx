@@ -49,7 +49,7 @@ export const consultarTarjeta = createServerFn({ method: "POST" })
     } catch {
       return { ok: false, estado: "Sin respuesta", detalle: "No pude consultar la intranet de Taxis Libres.", bloqueo: "" };
     }
-    if (!crudo) return { ok: false, estado: "Sin registro", detalle: "La intranet todavía no tiene esta placa.", bloqueo: "" };
+    if (!crudo) return { ok: false, estado: "Sin respuesta", detalle: "La intranet de Taxis Libres contestó vacía. El servicio de ellos no está entregando el estado.", bloqueo: "" };
     const inicio = crudo.indexOf("{");
     const fin = crudo.lastIndexOf("}");
     if (inicio >= 0 && fin > inicio) crudo = crudo.slice(inicio, fin + 1);

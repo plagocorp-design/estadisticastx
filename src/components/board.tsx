@@ -3216,7 +3216,12 @@ function EstadoIntranet({ placa }: { placa: string }) {
           {busy ? "Consultando…" : "Consultar"}
         </button>
       </div>
-      <p className="mt-1 text-xs text-ink-soft">Así va la tarjeta de {placa || "esta placa"} en la intranet de Taxis Libres.</p>
+      <p className="mt-1 text-xs text-ink-soft">
+        Así va la tarjeta de {placa || "esta placa"} en la intranet de Taxis Libres.{" "}
+        <a href="https://www.taxislibres.com.co/intranet/estadoTo.php" target="_blank" rel="noreferrer" className="font-semibold underline">
+          Abrir la página de ellos
+        </a>
+      </p>
       {dato ? (
         <div className={"mt-3 rounded-2xl px-3 py-3 " + tono}>
           <p className="text-xs font-semibold uppercase tracking-wide opacity-80">Así va</p>
