@@ -2,14 +2,18 @@
 <meta charset="utf-8" />
 <title>Vincula Libre</title>
 <style>
-  body { font: 14px/1.4 system-ui, sans-serif; width: 280px; margin: 12px; color: #14213d; }
+  body { font: 14px/1.4 system-ui, sans-serif; width: 300px; margin: 12px; color: #14213d; }
   label { display: block; font-weight: 650; margin-top: 10px; }
   input { width: 100%; box-sizing: border-box; margin-top: 4px; height: 36px; border: 1px solid #d5d8e0; border-radius: 10px; padding: 0 8px; }
-  button { margin-top: 12px; height: 36px; width: 100%; border: 0; border-radius: 10px; background: #14213d; color: white; font-weight: 700; }
+  button { margin-top: 12px; height: 36px; width: 100%; border: 0; border-radius: 10px; background: #1B3A4B; color: white; font-weight: 700; }
   p { color: #5c6578; font-size: 12px; }
 </style>
-<label>Dirección del programa<input id="url" placeholder="https://vincula-libre.vercel.app" /></label>
-<label>Clave de Control<input id="token" placeholder="Pégala aquí" /></label>
+<p>Esta ventana es el icono VL de la barra de Chrome. No está dentro de Vincula Libre.</p>
+<label>Tu clave, la de Control<input id="token" placeholder="Cada asesor pega la suya" /></label>
 <button id="guardar" type="button">Guardar</button>
-<p id="aviso">La clave sale en Control, en Extensión de WhatsApp.</p>
+<p id="aviso">La dirección ya queda en vincula-libre.vercel.app para todo el equipo. La clave sí es de cada uno, para que Control sepa quién atendió.</p>
+<details>
+  <summary>Cambiar dirección</summary>
+  <label>Dirección<input id="url" /></label>
+</details>
 <script src="popup.js"></script>

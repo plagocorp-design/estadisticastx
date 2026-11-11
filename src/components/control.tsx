@@ -1077,7 +1077,7 @@ function ClaveWhatsapp() {
     <details className="mt-3 max-w-2xl rounded-2xl border border-line bg-card px-4 py-3 text-sm">
       <summary className="cursor-pointer font-semibold">Extensión de WhatsApp</summary>
       <p className="mt-2 text-ink-soft">
-        Al abrir WhatsApp Web se marca la gestión en Control. Cada chat se cuenta desde el primer mensaje de hoy, aunque el chat sea viejo y todavía no tengas la placa ni el nombre. El verde es atendido y el rojo es que no se pudo. Los dos quedan guardados.
+        El icono VL no está aquí. Está en la barra de Chrome, después de instalar la extensión. Aquí solo se copia la clave de cada asesor. La dirección del programa ya es la misma para todos.
       </p>
       <p className="mt-2 break-all font-mono text-xs">{token || "…"}</p>
       {aviso ? <p className="mt-2 text-danger">{aviso}</p> : null}
