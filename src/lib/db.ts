@@ -12,10 +12,10 @@ const databaseUrl =
   rawDatabaseUrl && rawDatabaseUrl.trim() ? rawDatabaseUrl : undefined;
 
 /**
- * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured
- * sandbox), otherwise a local embedded **PGLite** (Postgres compiled to WASM) so
- * the app has a working database even with nothing configured — the live preview
- * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
+ * Active backend: real Postgres when `DATABASE_URL` is set (Neon o RDS de
+ * Huawei Cloud sirven igual), otherwise a local embedded **PGLite** so the
+ * app has a working database even with nothing configured — the live preview
+ * included. Swap in the cloud database by setting `DATABASE_URL`; no code changes.
  */
 export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
 
@@ -152,6 +152,29 @@ async function createPgliteSql(): Promise<Sql> {
 }
 
 let sqlPromise: Promise<Sql> | null = null;
+let registroLimpio = false;
+
+/** Quita del registro las entradas, salidas, marcas del día y cambios de acceso. */
+async function quitarRegistroOperativo(sql: Sql): Promise<Sql> {
+  if (registroLimpio) return sql;
+  registroLimpio = true;
+  try {
+    await sql.query(
+      `delete from auditoria
+       where (entidad = 'control' and (
+           accion = 'marco'
+           or detalle ilike 'Quitó la marca %'
+           or detalle ilike 'Registró en %'
+           or detalle ilike 'Anotó en %'
+         ))
+          or (entidad = 'equipo' and detalle ilike 'Cambió el acceso de %')`,
+    );
+  } catch (err) {
+    registroLimpio = false;
+    console.error("[db] no pude limpiar el registro operativo", err);
+  }
+  return sql;
+}
 
 async function createSql() {
   if (typeof window !== "undefined") {
@@ -170,10 +193,12 @@ async function createSql() {
  * both backends — define tables there, never inline in server functions.
  */
 export function getSql() {
-  sqlPromise ??= createSql().catch((err) => {
-    sqlPromise = null;
-    throw err;
-  });
+  sqlPromise ??= createSql()
+    .then(quitarRegistroOperativo)
+    .catch((err) => {
+      sqlPromise = null;
+      throw err;
+    });
   return sqlPromise;
 }
 

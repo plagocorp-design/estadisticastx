@@ -20,6 +20,7 @@ export type DatosFirma = {
   serie: string;
   cilindraje: string;
   servicio: string;
+  capacidad: string;
   copropietario: string;
   cc2?: string;
   propietarios?: { nombre: string; cc: string }[];
@@ -101,6 +102,7 @@ export const enviarPortal = createServerFn({ method: "POST" })
     serie?: string;
     cilindraje?: string;
     servicio?: string;
+    capacidad?: string;
     nitAnterior?: string;
     otros?: { nombre?: string; cc?: string; correo?: string }[];
     soloAbrir?: boolean;
@@ -155,6 +157,7 @@ export const enviarPortal = createServerFn({ method: "POST" })
       serie: recorte(data.serie ?? "", 40),
       cilindraje: recorte(data.cilindraje ?? "", 20),
       servicio: recorte(data.servicio || "PÚBLICO", 40),
+      capacidad: recorte(data.capacidad || String(caso.capacidad ?? ""), 8),
       copropietario: otros[0]?.nombre ?? "",
       cc2: otros[0]?.cc ?? "",
       propietarios: otros.map((parte) => ({ nombre: parte.nombre, cc: parte.cc })),
@@ -163,8 +166,8 @@ export const enviarPortal = createServerFn({ method: "POST" })
     };
     if (!datos.placa || !datos.nombre) throw new Error("Primero guarda placa y propietario");
     await sql.query(
-      `update casos set nombre = $1, cc = $2, telefono = $3, direccion = $4, correo = $5, marca = $6, linea = $7, modelo = $8, copropietarios = $9, updated_at = now() where id = $10`,
-      [datos.nombre, datos.cc, datos.telefono, datos.direccion, datos.correo, datos.marca, datos.linea, datos.modelo, JSON.stringify(otros), data.casoId],
+      `update casos set nombre = $1, cc = $2, telefono = $3, direccion = $4, correo = $5, marca = $6, linea = $7, modelo = $8, copropietarios = $9, capacidad = $10, updated_at = now() where id = $11`,
+      [datos.nombre, datos.cc, datos.telefono, datos.direccion, datos.correo, datos.marca, datos.linea, datos.modelo, JSON.stringify(otros), datos.capacidad, data.casoId],
     );
     const sobre = await sql.query<{ id: number }>(
       `insert into sobres (caso_id, datos, creado_por) values ($1, $2, $3) returning id`,
@@ -454,4 +457,67 @@ export const firmarPortal = createServerFn({ method: "POST" })
       },
     );
     return { ok: true, completo: pendientes.length === 0 };
+  });
+
+export const generarCartaDevolucion = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: {
+    destino: "empresa" | "aseguradora" | "desvinculacion";
+    ciudad?: string;
+    empresa: string;
+    nit?: string;
+    direccionEmpresa?: string;
+    correoEmpresa?: string;
+    propietario: string;
+    cc?: string;
+    telefono?: string;
+    correo?: string;
+    placa: string;
+    marca?: string;
+    modelo?: string;
+    aseguradora?: string;
+    poliza?: string;
+    desde: string;
+    liquidacion?: string;
+    fecha?: string;
+  }) => input)
+  .handler(async ({ data }) => {
+    const empresa = recorte(data.empresa ?? "", 120);
+    const propietario = recorte(data.propietario ?? "", 120);
+    const placa = recorte(data.placa ?? "", 8).toUpperCase();
+    const aseguradora = recorte(data.aseguradora ?? "", 80);
+    if (data.destino !== "aseguradora" && empresa.length < 3) throw new Error("Falta la empresa");
+    if (data.destino === "aseguradora" && aseguradora.length < 3) throw new Error("Falta la aseguradora");
+    if (propietario.length < 3) throw new Error("Falta el nombre del propietario");
+    if (placa.length < 5) throw new Error("Falta la placa");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.desde)) throw new Error("Falta el día desde el que se excluye el vehículo");
+    const datos = {
+      ciudad: recorte(data.ciudad || "Bogotá D.C.", 40),
+      empresa,
+      nit: recorte(data.nit ?? "", 20),
+      direccionEmpresa: recorte(data.direccionEmpresa ?? "", 120),
+      correoEmpresa: recorte(data.correoEmpresa ?? "", 80),
+      propietario,
+      cc: recorte(data.cc ?? "", 20),
+      telefono: recorte(data.telefono ?? "", 20),
+      correo: recorte(data.correo ?? "", 80),
+      placa,
+      marca: recorte(data.marca ?? "", 40),
+      modelo: recorte(data.modelo ?? "", 10),
+      aseguradora,
+      poliza: recorte(data.poliza ?? "", 40),
+      desde: data.desde,
+      liquidacion: recorte(data.liquidacion ?? "", 500),
+      fecha: /^\d{4}-\d{2}-\d{2}$/.test(data.fecha ?? "") ? data.fecha! : new Date().toISOString().slice(0, 10),
+    };
+    const { montarCartaDevolucion, montarCartaAseguradora, montarCartaDesvinculacion } = await import("./carta-pdf.server");
+    const base64 =
+      data.destino === "aseguradora"
+        ? await montarCartaAseguradora(datos)
+        : data.destino === "desvinculacion"
+          ? await montarCartaDesvinculacion(datos)
+          : await montarCartaDevolucion(datos);
+    const filename =
+      data.destino === "aseguradora" ? `aseguradora-${placa}.pdf` : data.destino === "desvinculacion" ? `desvinculacion-${placa}.pdf` : `empresa-${placa}.pdf`;
+    return { base64, filename };
   });

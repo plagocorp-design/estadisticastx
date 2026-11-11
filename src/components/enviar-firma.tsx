@@ -24,6 +24,13 @@ export function EnviarFirma({
   linea,
   modelo,
   empresa,
+  capacidad = "",
+  clase = "AUTOMÓVIL",
+  carroceria = "",
+  motor = "",
+  serie = "",
+  cilindraje = "",
+  servicio = "PÚBLICO",
   copropietarios = "",
   onEnviado,
 }: {
@@ -38,6 +45,13 @@ export function EnviarFirma({
   linea: string;
   modelo: string;
   empresa: string;
+  capacidad?: string;
+  clase?: string;
+  carroceria?: string;
+  motor?: string;
+  serie?: string;
+  cilindraje?: string;
+  servicio?: string;
   copropietarios?: string;
   onEnviado?: (id: string) => void;
 }) {
@@ -47,12 +61,13 @@ export function EnviarFirma({
   const [marcaV, setMarcaV] = useState(marca);
   const [lineaV, setLineaV] = useState(linea);
   const [modeloV, setModeloV] = useState(modelo);
-  const [clase, setClase] = useState("AUTOMÓVIL");
-  const [carroceria, setCarroceria] = useState("");
-  const [motor, setMotor] = useState("");
-  const [serie, setSerie] = useState("");
-  const [cilindraje, setCilindraje] = useState("");
-  const [servicio, setServicio] = useState("PÚBLICO");
+  const [claseV, setClase] = useState(clase || "AUTOMÓVIL");
+  const [carroceriaV, setCarroceria] = useState(carroceria);
+  const [motorV, setMotor] = useState(motor);
+  const [serieV, setSerie] = useState(serie);
+  const [cilindrajeV, setCilindraje] = useState(cilindraje);
+  const [servicioV, setServicio] = useState(servicio || "PÚBLICO");
+  const [pasajeros, setPasajeros] = useState(capacidad);
   const [nitAnterior, setNitAnterior] = useState("");
   const [otros] = useState<{ nombre: string; cc: string; correo: string }[]>(() => {
     try {
@@ -86,12 +101,13 @@ export function EnviarFirma({
           marca: marcaV,
           linea: lineaV,
           modelo: modeloV,
-          clase,
-          carroceria,
-          motor,
-          serie,
-          cilindraje,
-          servicio,
+          clase: claseV,
+          carroceria: carroceriaV,
+          motor: motorV,
+          serie: serieV,
+          cilindraje: cilindrajeV,
+          servicio: servicioV,
+          capacidad: pasajeros,
           nitAnterior,
           otros,
           soloAbrir,
@@ -144,12 +160,13 @@ export function EnviarFirma({
         <input value={modeloV} onChange={(e) => setModeloV(e.target.value)} placeholder="Modelo" className="h-11 rounded-2xl border border-line px-3" />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <input value={clase} onChange={(e) => setClase(e.target.value)} placeholder="Clase" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={carroceria} onChange={(e) => setCarroceria(e.target.value)} placeholder="Carrocería" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={motor} onChange={(e) => setMotor(e.target.value)} placeholder="Motor" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={serie} onChange={(e) => setSerie(e.target.value)} placeholder="Serie" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={cilindraje} onChange={(e) => setCilindraje(e.target.value)} placeholder="Cilindraje" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={servicio} onChange={(e) => setServicio(e.target.value)} placeholder="Servicio" className="h-11 rounded-2xl border border-line px-3" />
+        <input value={claseV} onChange={(e) => setClase(e.target.value)} placeholder="Clase" className="h-11 rounded-2xl border border-line px-3" />
+        <input value={carroceriaV} onChange={(e) => setCarroceria(e.target.value)} placeholder="Carrocería" className="h-11 rounded-2xl border border-line px-3" />
+        <input value={motorV} onChange={(e) => setMotor(e.target.value)} placeholder="Motor" className="h-11 rounded-2xl border border-line px-3" />
+        <input value={serieV} onChange={(e) => setSerie(e.target.value)} placeholder="Serie" className="h-11 rounded-2xl border border-line px-3" />
+        <input value={cilindrajeV} onChange={(e) => setCilindraje(e.target.value)} placeholder="Cilindraje" className="h-11 rounded-2xl border border-line px-3" />
+        <input value={servicioV} onChange={(e) => setServicio(e.target.value)} placeholder="Servicio" className="h-11 rounded-2xl border border-line px-3" />
+        <input value={pasajeros} onChange={(e) => setPasajeros(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="Pasajeros" className="h-11 rounded-2xl border border-line px-3" />
       </div>
       {empresa && !/ninguna/i.test(empresa) ? (
         <input value={nitAnterior} onChange={(e) => setNitAnterior(e.target.value)} placeholder={`NIT de ${empresa}, si lo tienes`} className="h-11 rounded-2xl border border-line px-3" />

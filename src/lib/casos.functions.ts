@@ -10,7 +10,7 @@ export type Me = { id: string; name: string; slug: string; role: Role; ciudadVis
 
 export const CASO_COLS = `
   c.id, c.owner_id, p.name as owner_name, c.placa, c.cc, c.nombre, c.telefono, c.empresa,
-  c.direccion, c.correo, c.marca, c.linea, c.modelo, c.fecha_firma, c.contrato_nombre,
+  c.direccion, c.correo, c.marca, c.linea, c.modelo, c.capacidad, c.clase, c.carroceria, c.motor, c.serie, c.cilindraje, c.servicio, c.fecha_firma, c.contrato_nombre,
   c.docuseal_id, c.docuseal_estado, c.auditoria_nombre,
   c.fecha_inicio, c.dijo_si, c.cedula, c.tarjeta_propiedad, c.tarjeta_operacion, c.soat,
   c.tecnomecanica, c.formulario, c.documentos, c.firma_carta, c.firma_contrato, c.plata_poliza,
@@ -131,6 +131,52 @@ async function asesorId(slug: string) {
   return rows[0].user_id;
 }
 
+export const pasarProceso = createServerFn({ method: "POST" })
+  .validator((input: { id: number; slug: string }) => input)
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const { profileFor } = await import("./team.server");
+    const profile = await profileFor(context.userId);
+    if (!profile) throw new Error("No encontré tu usuario");
+    const destinoId = await asesorId(data.slug);
+    const sql = await getSql();
+    const rows = await sql.query<{ id: number; owner_id: string; placa: string; ciudad_id: number | null }>(
+      `select id, owner_id, placa, ciudad_id from casos where id = $1`,
+      [data.id],
+    );
+    const caso = rows[0];
+    if (!caso) throw new Error("No encontré ese proceso");
+    const soyDueno = caso.owner_id === context.userId;
+    if (!soyDueno && !veElEquipo(profile.role)) throw new Error("Solo quien lo tiene puede pasarlo");
+    if (destinoId === caso.owner_id) throw new Error("Ese proceso ya es de ese asesor");
+    const personas = await sql.query<{ name: string; ciudad_id: number | null }>(
+      `select name, ciudad_id from profiles where user_id = $1`,
+      [destinoId],
+    );
+    const persona = personas[0];
+    if (!persona) throw new Error("No encontré a ese asesor");
+    const ciudadCaso = Number(caso.ciudad_id || 0);
+    const ciudadPersona = Number(persona.ciudad_id || 0);
+    if (!veElEquipo(profile.role) && ciudadCaso && ciudadPersona && ciudadCaso !== ciudadPersona) {
+      throw new Error("Ese asesor no está en tu ciudad");
+    }
+    await sql.query(`update casos set owner_id = $1, updated_at = now() where id = $2`, [destinoId, caso.id]);
+    await sql.query(`insert into mensajes (caso_id, author_id, body) values ($1, $2, $3)`, [
+      caso.id,
+      context.userId,
+      `${profile.name} pasó ${caso.placa} a ${persona.name}.`,
+    ]);
+    const { anotar } = await import("./auditoria.server");
+    await anotar(profile, {
+      accion: "movio",
+      entidad: "proceso",
+      entidadId: caso.id,
+      etiqueta: caso.placa,
+      detalle: `Pasó ${caso.placa} a ${persona.name}`,
+    });
+    return { ownerId: destinoId, ownerName: persona.name };
+  });
+
 function dato(value: string | undefined, max: number) {
   return clean(value ?? "", max);
 }
@@ -193,12 +239,14 @@ export const createCaso = createServerFn({ method: "POST" })
     const rows = await sql<{ id: number }>`
       insert into casos (
         owner_id, placa, cc, nombre, telefono, empresa, origen, fecha_inicio, dijo_si, firma_contrato,
-        direccion, correo, marca, linea, modelo, fecha_firma, contrato_nombre, contrato_pdf, copropietarios
+        direccion, correo, marca, linea, modelo, capacidad, clase, carroceria, motor, serie, cilindraje, servicio, fecha_firma, contrato_nombre, contrato_pdf, copropietarios
       )
       values (
         ${ownerId}, ${placa}, ${cc}, ${nombre}, ${telefono}, ${empresa}, ${dato(data.origen, 80)}, ${hoy}, ${Boolean(pdf)}, ${Boolean(data.firmaContrato)},
         ${dato(data.direccion, 120)}, ${dato(data.correo, 80)}, ${dato(data.marca, 40)},
-        ${dato(data.linea, 40)}, ${dato(data.modelo, 8)}, ${firma},
+        ${dato(data.linea, 40)}, ${dato(data.modelo, 8)}, ${dato(data.capacidad, 8)},
+        ${dato(data.clase, 24)}, ${dato(data.carroceria, 24)}, ${dato(data.motor, 24)}, ${dato(data.serie, 24)}, ${dato(data.cilindraje, 12)}, ${dato(data.servicio, 20)},
+        ${firma},
         ${pdf ? dato(data.contratoNombre, 120) : ""}, ${pdf}, ${extras}
       )
       returning id
@@ -239,6 +287,13 @@ export type CasoPatch = {
   marca: string;
   linea: string;
   modelo: string;
+  capacidad?: string;
+  clase?: string;
+  carroceria?: string;
+  motor?: string;
+  serie?: string;
+  cilindraje?: string;
+  servicio?: string;
   fechaFirma: string;
   fechaCompra?: string;
   origen: string;
@@ -325,6 +380,13 @@ export const updateCaso = createServerFn({ method: "POST" })
       /^\d{2}:\d{2}$/.test(data.citaHora ?? "") ? data.citaHora : "",
       entregaLista(data.entrega),
       JSON.stringify(otrosPropietarios(data.copropietarios)),
+      dato(data.capacidad, 8),
+      dato(data.clase, 24),
+      dato(data.carroceria, 24),
+      dato(data.motor, 24),
+      dato(data.serie, 24),
+      dato(data.cilindraje, 12),
+      dato(data.servicio, 20),
     ];
     let text = `update casos set
       placa = $1, cc = $2, nombre = $3, telefono = $4, empresa = $5,
@@ -338,7 +400,8 @@ export const updateCaso = createServerFn({ method: "POST" })
       fecha_poliza = $32, origen = $33, motivo_cierre = $34, fecha_cierre = $35, fecha_compra = $36,
       poliza_fase = case when $18 then poliza_fase else '' end,
       poliza_entrega = case when $18 then poliza_entrega else '' end,
-      cita_fecha = $37, cita_hora = $38, entrega = $39, copropietarios = $40,
+      cita_fecha = $37, cita_hora = $38, entrega = $39, copropietarios = $40, capacidad = $41,
+      clase = $42, carroceria = $43, motor = $44, serie = $45, cilindraje = $46, servicio = $47,
       updated_at = now()`;
     if (data.contratoPdf && data.contratoPdf.length > 80) {
       params.push(dato(data.contratoNombre, 120), data.contratoPdf);

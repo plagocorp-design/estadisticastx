@@ -65,6 +65,15 @@ async function bajarConector(driveId: string) {
 export async function guardarEnDrive(nombre: string, archivo: string, placa = "") {
   const limpia = placa.replace(/[^A-Za-z0-9]/g, "").slice(0, 10) || "SIN-PLACA";
   try {
+    const { obsConfig, guardarEnObs } = await import("./obs.server");
+    if (obsConfig()) {
+      const id = await guardarEnObs(nombre, archivo, limpia);
+      if (id) return { id, enLaNube: true };
+    }
+  } catch (err) {
+    console.error("[obs] no pude guardar", err instanceof Error ? err.message : err);
+  }
+  try {
     const data = await postScript({ accion: "archivo", nombre, archivo, placa: limpia });
     if (data?.ok && data.id) return { id: data.id, enLaNube: true };
   } catch {
@@ -81,6 +90,15 @@ export async function guardarEnDrive(nombre: string, archivo: string, placa = ""
 
 export async function borrarDeDrive(driveId: string) {
   if (!driveId) return;
+  if (driveId.startsWith("obs:")) {
+    try {
+      const { borrarDeObs } = await import("./obs.server");
+      await borrarDeObs(driveId);
+    } catch (err) {
+      console.error("[obs] no pude borrar", err instanceof Error ? err.message : err);
+    }
+    return;
+  }
   try {
     const data = await postScript({ accion: "borrar", id: driveId });
     if (data?.ok) return;
@@ -97,6 +115,15 @@ export async function borrarDeDrive(driveId: string) {
 
 export async function leerDeDrive(driveId: string) {
   if (!driveId) return "";
+  if (driveId.startsWith("obs:")) {
+    try {
+      const { leerDeObs } = await import("./obs.server");
+      return await leerDeObs(driveId);
+    } catch (err) {
+      console.error("[obs] no pude leer", err instanceof Error ? err.message : err);
+      return "";
+    }
+  }
   try {
     const data = await postScript({ accion: "bajar", id: driveId });
     if (data?.ok && data.archivo) return data.archivo;

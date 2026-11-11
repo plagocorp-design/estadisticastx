@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { agregarAsesor, cambiarClave, cambiarMiClave, guardarAcceso, guardarPersona, listEquipo } from "@/lib/control.functions";
 import type { PersonaEquipo } from "@/lib/control";
-import { AREAS_APP, PODERES_APP, SECCIONES_APP, accesoDe, accesoVacio, esBandeja, etiquetaRol, llevaProcesos, type Acceso } from "@/lib/team.public";
+import { AREAS_APP, PODERES_APP, SECCIONES_APP, accesoDe, accesoVacio, esBandeja, etiquetaRol, llevaProcesos, type Acceso, type Role } from "@/lib/team.public";
 
 function textoCredencial(persona: PersonaEquipo) {
   return `Usuario: ${persona.slug}\nClave: ${persona.clave ?? ""}`;
@@ -208,11 +208,33 @@ function PersonaCard({
   const [guardandoClave, setGuardandoClave] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const [acceso, setAcceso] = useState<Acceso>(() => accesoDe(persona.role, persona.acceso));
+  useEffect(() => {
+    setAcceso(accesoDe(persona.role, persona.acceso));
+  }, [persona.role, persona.acceso]);
   return (
     <li className={"rounded-card border border-line bg-card p-4 " + (persona.activo ? "" : "opacity-70")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold">{persona.name}</p>
-        <p className="text-sm font-medium text-ink-soft">{etiquetaRol(persona.role)}</p>
+        {edita && persona.slug !== "david" ? (
+          <label className="text-sm font-medium">
+            Rol
+            <select
+              value={ROLES.some((item) => item.id === persona.role) ? persona.role : "asesor"}
+              onChange={(e) => {
+                const next = accesoPorRol(e.target.value as Role, acceso);
+                setAcceso(next);
+                onAcceso(next);
+              }}
+              className="ml-2 h-10 rounded-2xl border border-line bg-card px-3"
+            >
+              {ROLES.map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="text-sm font-medium text-ink-soft">{etiquetaRol(persona.role)}</p>
+        )}
       </div>
       {edita ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
@@ -335,6 +357,26 @@ function PersonaCard({
       ) : null}
     </li>
   );
+}
+
+const ROLES: { id: Role; label: string }[] = [
+  { id: "asesor", label: "Asesor" },
+  { id: "lider", label: "Asesor líder" },
+  { id: "coordinadora", label: "Coordinación" },
+  { id: "via_seguros", label: "Vía Seguros" },
+  { id: "operativa", label: "Operativa" },
+  { id: "servicio", label: "Servicio al cliente" },
+];
+
+function accesoPorRol(rol: Role, actual: Acceso): Acceso {
+  if (rol === "lider") return { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["propios", "ver_equipo", "configurar"], area: "" };
+  if (rol === "coordinadora") {
+    const secciones = [...new Set([...actual.secciones, "equipo", "auditoria"])];
+    return { secciones, poderes: ["ver_equipo"], area: "" };
+  }
+  if (rol === "via_seguros" || rol === "operativa" || rol === "servicio") return { secciones: ["procesos"], poderes: [], area: rol };
+  const secciones = actual.secciones.filter((id) => id !== "equipo" && id !== "auditoria");
+  return { secciones: secciones.length > 0 ? secciones : accesoVacio().secciones, poderes: ["propios"], area: "" };
 }
 
 export function SelectorAcceso({ value, onChange, bloqueado }: { value: Acceso; onChange: (acceso: Acceso) => void; bloqueado?: boolean }) {

@@ -42,7 +42,8 @@ import {
   type PilotoEstado,
 } from "@/lib/piloto.functions";
 import { configura, esBandeja, etiquetaRol, llevaProcesos, type Role } from "@/lib/team.public";
-import { enviarEnTrozos, prepararArchivo, traerPorTrozos, TOPE_ENVIO } from "@/lib/archivo";
+import { enviarEnTrozos, prepararArchivo, prepararParaLeer, traerPorTrozos, TOPE_ENVIO } from "@/lib/archivo";
+import { EditorHojas } from "@/components/editor-hojas";
 
 function fallo(err: unknown) {
   return err instanceof Error ? err.message : "No se pudo guardar";
@@ -325,6 +326,7 @@ export function BloquePiloto({
   const [ocupado, setOcupado] = useState(false);
   const [vista, setVista] = useState<{ id: number; nombre: string; archivo: string } | null>(null);
   const [lectura, setLectura] = useState<LecturaDoc | null>(null);
+  const [editor, setEditor] = useState<{ id: string; nombre: string; src: string }[] | null>(null);
   const [etiquetas, setEtiquetas] = useState<Record<string, string>>({});
   const [pasosOn, setPasosOn] = useState<Record<string, boolean>>({});
   const [textoOperativa, setTextoOperativa] = useState("Enviar a operativa");
@@ -442,15 +444,52 @@ export function BloquePiloto({
         marca: caso.marca,
         linea: caso.linea,
         modelo: caso.modelo,
+        capacidad: caso.capacidad,
+        clase: caso.clase,
+        carroceria: caso.carroceria,
+        motor: caso.motor,
+        serie: caso.serie,
+        cilindraje: caso.cilindraje,
+        servicio: caso.servicio,
         empresa: caso.empresa,
       };
-      let leida: LecturaDoc | null = null;
-      if (listo.archivo.length <= TOPE_ENVIO) {
+      let paraLeer = listo;
+      if (file.type.startsWith("image/") || paraLeer.archivo.length > TOPE_ENVIO) {
         try {
-          leida = await leerDocumento({ data: { tipo: elegido, nombre: listo.nombre, archivo: listo.archivo, actual } });
+          paraLeer = await prepararParaLeer(file);
         } catch {
-          leida = null;
+          paraLeer = listo;
         }
+      }
+      let leida: LecturaDoc | null = null;
+      if (paraLeer.archivo.length <= 8_000_000) {
+        try {
+          leida = await leerDocumento({ data: { tipo: elegido, nombre: paraLeer.nombre, archivo: paraLeer.archivo, actual } });
+        } catch (err) {
+          leida = {
+            vigencia: "sin_fecha",
+            vence: "",
+            aviso: err instanceof Error ? err.message : "No pude leer la foto",
+            campos: [],
+          };
+        }
+      }
+      if (leida) {
+        const patch: Partial<Caso> = {};
+        const choques: LecturaDoc["campos"] = [];
+        for (const campo of leida.campos) {
+          if (!String(actual[campo.key] ?? "").trim()) patch[campo.key] = campo.leido;
+          else choques.push(campo);
+        }
+        if (Object.keys(patch).length) onCaso(patch);
+        const etiquetasLlenas = leida.campos.filter((campo) => campo.key in patch).map((campo) => campo.label);
+        leida = {
+          ...leida,
+          campos: choques,
+          aviso: etiquetasLlenas.length
+            ? `Llené ${etiquetasLlenas.join(", ")} con la foto.${choques.length ? " Confirma lo que no coincidía." : ""}`
+            : leida.aviso,
+        };
       }
       const cargaId = crypto.randomUUID();
       await enviarEnTrozos(listo.archivo, async (orden, datos, fin) => {
@@ -642,6 +681,27 @@ export function BloquePiloto({
                   />
                 </label>
               </div>
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() =>
+                  void correr(async () => {
+                    const cargadas: { id: string; nombre: string; src: string }[] = [];
+                    for (const doc of docs) {
+                      const file = await traerDocumento(doc.id);
+                      const bytes = bytesDe(file.archivo);
+                      if (!esFoto(file.nombre, bytes)) continue;
+                      const mime = file.nombre.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+                      cargadas.push({ id: String(doc.id), nombre: `${nombreDe(doc.tipo)} · ${file.nombre}`, src: `data:${mime};base64,${file.archivo}` });
+                    }
+                    if (!cargadas.length) throw new Error("No hay fotos para acomodar. Sube cada documento en foto. Los PDF se quedan como están.");
+                    setEditor(cargadas);
+                  })
+                }
+                className="h-11 w-fit rounded-2xl border border-line bg-card px-4 text-sm font-semibold disabled:opacity-60"
+              >
+                Acomodar fotos en hojas
+              </button>
             </div>
           ) : null}
           {lectura ? (
@@ -749,6 +809,25 @@ export function BloquePiloto({
             ))}
             {docsVisibles.length === 0 ? <li className="text-sm text-ink-soft">Todavía no hay archivos. Sube el paquete completo o cada documento por separado.</li> : null}
           </ul>
+          {editor ? (
+            <EditorHojas
+              fotos={editor}
+              onCerrar={() => setEditor(null)}
+              onGuardar={async (hojas) => {
+                for (const hoja of hojas) {
+                  const cargaId = crypto.randomUUID();
+                  await enviarEnTrozos(hoja.archivo, async (orden, datos, fin) => {
+                    await recibirTrozo({
+                      data: { cargaId, orden, datos, fin, casoId: caso.id, tipo: "unificado", nombre: hoja.nombre, lectura: "" },
+                    });
+                  });
+                }
+                setEditor(null);
+                await cargar();
+                onListo();
+              }}
+            />
+          ) : null}
           {vista ? (
             <div className="fixed inset-0 z-40 grid place-items-center bg-ink/50 p-4" onClick={() => setVista(null)}>
               <div className="grid max-h-[90vh] w-full max-w-3xl gap-3 overflow-auto rounded-card bg-card p-4" onClick={(e) => e.stopPropagation()}>

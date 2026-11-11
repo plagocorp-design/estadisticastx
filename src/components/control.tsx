@@ -72,6 +72,7 @@ export function ControlVista({
     if (!horaTocada) setHoraMarca(hora);
   }, [hora, horaTocada]);
   const puedeMarcar = veElEquipo(me.role) && verEquipo;
+  const corrige = veElEquipo(me.role);
   const esHoy = fecha === hoy;
 
   async function cargar(dia = fecha) {
@@ -200,39 +201,39 @@ export function ControlVista({
   return (
     <section>
       <h1 className="text-lg font-semibold">{verEquipo ? "Control del equipo" : "Tu control"}</h1>
-      {verEquipo ? (
+      {corrige ? (
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <label className="text-sm font-medium">
             Día
             <input type="date" value={fecha} onChange={(e) => e.target.value && setFecha(e.target.value)} className="mt-1 block h-11 rounded-2xl border border-line px-3" />
           </label>
-          {puedeMarcar ? (
-            <label className="text-sm font-medium">
-              Hora de la marca
-              <input type="time" value={horaMarca} onChange={(e) => { setHoraTocada(true); setHoraMarca(e.target.value); }} className="mt-1 block h-11 rounded-2xl border border-line px-3" />
-            </label>
+          <label className="text-sm font-medium">
+            Hora de la marca
+            <input type="time" value={horaMarca} onChange={(e) => { setHoraTocada(true); setHoraMarca(e.target.value); }} className="mt-1 block h-11 rounded-2xl border border-line px-3" />
+          </label>
+          {verEquipo ? (
+            <button
+              type="button"
+              disabled={ocupado}
+              className="h-11 rounded-2xl border border-line bg-card px-4 text-sm font-semibold disabled:opacity-60"
+              onClick={() => {
+                setOcupado(true);
+                setError("");
+                exportarControl({ data: fecha.slice(0, 7) })
+                  .then((file) => bajarExcel(file.base64, file.filename))
+                  .catch((err: Error) => setError(err.message))
+                  .finally(() => setOcupado(false));
+              }}
+            >
+              Exportar el mes
+            </button>
           ) : null}
-          <button
-            type="button"
-            disabled={ocupado}
-            className="h-11 rounded-2xl border border-line bg-card px-4 text-sm font-semibold disabled:opacity-60"
-            onClick={() => {
-              setOcupado(true);
-              setError("");
-              exportarControl({ data: fecha.slice(0, 7) })
-                .then((file) => bajarExcel(file.base64, file.filename))
-                .catch((err: Error) => setError(err.message))
-                .finally(() => setOcupado(false));
-            }}
-          >
-            Exportar el mes
-          </button>
         </div>
       ) : null}
       <p className="mt-3 max-w-2xl text-sm text-ink-soft">
         {verEquipo
-          ? "Llegó y se fue son la entrada y la salida. Llamar puede seguir mientras atienden WhatsApp: en esa gestión se agregan las personas una tras otra, sin cerrarla. Break, almuerzo o bajar con un cliente sí la pausan."
-          : "Marca cuándo llegas y cuándo te vas. Si abres WhatsApp, sigue llamando y ve agregando cada persona. Al pasar a break, almuerzo o un cliente, esa gestión se cierra."}
+          ? "Llegó y se fue son la entrada y la salida. Llamar se empieza y se termina como cualquier gestión. WhatsApp se puede al mismo tiempo. Break, almuerzo o un cliente pausan lo que esté abierto."
+          : "Marca cuándo llegas y cuándo te vas. Llamar no queda abierto solo: lo empiezas y lo terminas. WhatsApp se puede al tiempo. Break y almuerzo también."}
       </p>
       {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
 
@@ -249,6 +250,7 @@ export function ControlVista({
             esHoy={esHoy}
             ocupado={ocupado}
             puedeMarcar
+            puedeCorregir={corrige}
             propio
             procesos={casos.filter((c) => c.ownerId === me.id && enCurso(c))}
             eligiendo={visitaDe === me.slug}
@@ -279,6 +281,8 @@ export function ControlVista({
                 esHoy={esHoy}
                 ocupado={ocupado}
                 puedeMarcar={puedeMarcar}
+                puedeCorregir={corrige}
+                propio={persona.slug === me.slug}
                 procesos={casos.filter((c) => c.ownerName === persona.name && enCurso(c))}
                 eligiendo={visitaDe === persona.slug}
                 onVisita={() => setVisitaDe(visitaDe === persona.slug ? "" : persona.slug)}
@@ -320,6 +324,7 @@ function Tarjeta({
   esHoy,
   ocupado,
   puedeMarcar,
+  puedeCorregir,
   propio,
   procesos,
   eligiendo,
@@ -336,6 +341,7 @@ function Tarjeta({
   esHoy: boolean;
   ocupado: boolean;
   puedeMarcar: boolean;
+  puedeCorregir: boolean;
   propio?: boolean;
   procesos: Caso[];
   eligiendo: boolean;
@@ -346,13 +352,32 @@ function Tarjeta({
   onQuitar: (id: number) => void;
 }) {
   const [formId, setFormId] = useState<number | null>(null);
+  const [alTiempo, setAlTiempo] = useState(false);
   const vista = textoAhora(marcas, tipos, persona?.slug ?? "", persona, hora, esHoy);
   const ahora = vista.ahora;
-  const yaBreak = marcas.some((m) => m.tipo === "break");
-  const yaAlmuerzo = marcas.some((m) => m.tipo === "almuerzo");
-  const extra = tipos.filter((tipo) => persona && leToca(tipo, persona.slug) && !tipo.predeterminada);
+  const yaBreak = pausaHecha(marcas, "break");
+  const yaAlmuerzo = pausaHecha(marcas, "almuerzo");
+  const extra = tipos.filter((tipo) => persona && leToca(tipo, persona.slug));
+  const alMismoTiempo = extra.filter((tipo) => tipo.paralela);
+  const unaSola = extra.filter((tipo) => !tipo.paralela);
   const form = extra.find((tipo) => tipo.id === formId) ?? null;
   const adentro = ahora.estado === "adentro" || ahora.estado === "break" || ahora.estado === "almuerzo" || ahora.estado === "visita" || ahora.estado === "otro" || ahora.estado === "actividad";
+  const enBase = ahora.estado === "adentro";
+  const nombreActual = ahora.estado === "actividad"
+    ? ahora.marca?.nombreTipo || "esta gestión"
+    : ahora.estado === "break"
+      ? "break"
+      : ahora.estado === "almuerzo"
+        ? "almuerzo"
+        : ahora.estado === "visita"
+          ? "la visita"
+          : ahora.estado === "otro"
+            ? ahora.marca?.nota || "esta salida"
+            : "esta gestión";
+  useEffect(() => {
+    setAlTiempo(false);
+    setFormId(null);
+  }, [ahora.estado, ahora.marca?.id]);
   return (
     <article className="rounded-card border border-line bg-card p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -371,7 +396,7 @@ function Tarjeta({
             <li key={marca.id}>
               <div className="flex items-baseline justify-between gap-2">
                 <span>{textoMarca(marca)}</span>
-                {puedeMarcar && !propio ? (
+                {puedeCorregir ? (
                   <button type="button" disabled={ocupado} onClick={() => onQuitar(marca.id)} className="text-xs font-semibold text-ink-soft">
                     Quitar
                   </button>
@@ -399,42 +424,39 @@ function Tarjeta({
             <Boton disabled={ocupado} onClick={() => onMarcar("ingreso")}>{propio ? "Llegué" : "Llegó"}</Boton>
           ) : null}
           {adentro ? (
-            <>
-              {extra.map((tipo) => {
-                const sesion = ahora.paralelas.find((marca) => marca.tipoId === tipo.id);
-                return (
-                  <Boton
-                    key={tipo.id}
-                    disabled={ocupado || (!sesion && tipo.unaVez && marcas.some((m) => m.tipoId === tipo.id))}
-                    fuerte={Boolean(sesion) || (!tipo.paralela && ahora.estado === "actividad" && ahora.marca?.tipoId === tipo.id)}
-                    onClick={() => {
-                      if (sesion && !tipo.pideContacto && !tipo.pideProceso) {
-                        onMarcar("soltar", null, tipo.id);
-                        return;
-                      }
-                      if (tipo.pideContacto || tipo.pideProceso || sesion) setFormId(formId === tipo.id ? null : tipo.id);
-                      else onActividad({ tipoId: tipo.id, contacto: "", telefono: "", placaLibre: "", sinProceso: false, casoId: null, nota: "" });
-                    }}
-                  >
-                    {sesion && tipo.pideContacto ? `Otra · ${tipo.nombre.replace(/^Atención por /i, "")}` : tipo.nombre}
+            enBase ? (
+              <>
+                <p className="w-full text-sm text-ink-soft">Elige la gestión. Llamar se empieza y se termina, no queda abierta sola.</p>
+                {unaSola.map((tipo) => (
+                  <BotonGestion key={tipo.id} tipo={tipo} marcas={marcas} ahora={ahora} formId={formId} ocupado={ocupado} setFormId={setFormId} onMarcar={onMarcar} onActividad={onActividad} />
+                ))}
+                {alMismoTiempo.map((tipo) => (
+                  <BotonGestion key={tipo.id} tipo={tipo} marcas={marcas} ahora={ahora} formId={formId} ocupado={ocupado} setFormId={setFormId} onMarcar={onMarcar} onActividad={onActividad} />
+                ))}
+                {ahora.estado === "break" ? null : <Boton disabled={ocupado || yaBreak} onClick={() => onMarcar("break")}>{yaBreak ? "Break ya lo tomaste" : propio ? "Voy a break" : "Salió a break"}</Boton>}
+                {ahora.estado === "almuerzo" ? null : <Boton disabled={ocupado || yaAlmuerzo} onClick={() => onMarcar("almuerzo")}>{yaAlmuerzo ? "Almuerzo ya lo tomaste" : propio ? "Voy a almuerzo" : "Salió a almuerzo"}</Boton>}
+                <Boton disabled={ocupado} onClick={onVisita}>{propio ? "Bajé con un cliente" : "Bajó con un cliente"}</Boton>
+                <Boton disabled={ocupado} rojo onClick={() => onMarcar("salida")}>Salida</Boton>
+              </>
+            ) : (
+              <>
+                <p className="w-full text-sm text-ink-soft">Estás en {nombreActual}. Termínala para empezar otra. Break y almuerzo se marcan aquí mismo.</p>
+                <Boton disabled={ocupado} fuerte onClick={() => onMarcar("volver")}>
+                  {propio ? `Terminar gestión de ${nombreActual}` : `Terminó gestión de ${nombreActual}`}
+                </Boton>
+                {ahora.estado === "break" ? null : <Boton disabled={ocupado || yaBreak} onClick={() => onMarcar("break")}>{yaBreak ? "Break ya lo tomaste" : propio ? "Voy a break" : "Salió a break"}</Boton>}
+                {ahora.estado === "almuerzo" ? null : <Boton disabled={ocupado || yaAlmuerzo} onClick={() => onMarcar("almuerzo")}>{yaAlmuerzo ? "Almuerzo ya lo tomaste" : propio ? "Voy a almuerzo" : "Salió a almuerzo"}</Boton>}
+                {ahora.paralelas.map((marca) => (
+                  <Boton key={`soltar-${marca.id}`} disabled={ocupado} onClick={() => { if (formId === marca.tipoId) setFormId(null); onMarcar("soltar", null, marca.tipoId); }}>
+                    {propio ? `Terminar ${marca.nombreTipo}` : `Terminó ${marca.nombreTipo}`}
                   </Boton>
-                );
-              })}
-              {yaBreak ? null : <Boton disabled={ocupado} fuerte={ahora.estado === "break"} onClick={() => onMarcar("break")}>{propio ? "Voy a break" : "Salió a break"}</Boton>}
-              {yaAlmuerzo ? null : <Boton disabled={ocupado} fuerte={ahora.estado === "almuerzo"} onClick={() => onMarcar("almuerzo")}>{propio ? "Voy a almuerzo" : "Salió a almuerzo"}</Boton>}
-              <Boton disabled={ocupado} fuerte={ahora.estado === "visita"} onClick={onVisita}>{propio ? "Bajé con un cliente" : "Bajó con un cliente"}</Boton>
-              {ahora.paralelas.map((marca) => (
-                <Boton key={`soltar-${marca.id}`} disabled={ocupado} onClick={() => { if (formId === marca.tipoId) setFormId(null); onMarcar("soltar", null, marca.tipoId); }}>
-                  {propio ? `Dejé ${marca.nombreTipo}` : `Dejó ${marca.nombreTipo}`}
-                </Boton>
-              ))}
-              {ahora.estado !== "adentro" ? (
-                <Boton disabled={ocupado} onClick={() => onMarcar("volver")} fuerte>
-                  {vista.base ? (propio ? `Terminé. Vuelvo a ${vista.base.nombre}` : `Terminó. Vuelve a ${vista.base.nombre}`) : "Falta la tipificación de base"}
-                </Boton>
-              ) : null}
-              <Boton disabled={ocupado} rojo onClick={() => onMarcar("salida")}>Salida</Boton>
-            </>
+                ))}
+                <Boton disabled={ocupado} onClick={() => setAlTiempo((v) => !v)}>{alTiempo ? "Cerrar" : "Agregar otra gestión al tiempo"}</Boton>
+                {alTiempo ? alMismoTiempo.map((tipo) => (
+                  <BotonGestion key={tipo.id} tipo={tipo} marcas={marcas} ahora={ahora} formId={formId} ocupado={ocupado} setFormId={setFormId} onMarcar={onMarcar} onActividad={onActividad} />
+                )) : null}
+              </>
+            )
           ) : null}
         </div>
       ) : null}
@@ -456,7 +478,7 @@ function Tarjeta({
           }}
         />
       ) : null}
-      {puedeMarcar && !propio && persona ? (
+      {puedeCorregir && persona ? (
         <Antes
           slug={persona.slug}
           yaBreak={yaBreak}
@@ -480,6 +502,48 @@ function Tarjeta({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function pausaHecha(marcas: MarcaControl[], tipo: "break" | "almuerzo") {
+  return marcas.some((marca) => marca.tipo === tipo && (marca.horaFin === "" || marca.horaFin > marca.hora));
+}
+
+function BotonGestion({
+  tipo,
+  marcas,
+  ahora,
+  formId,
+  ocupado,
+  setFormId,
+  onMarcar,
+  onActividad,
+}: {
+  tipo: TipoActividad;
+  marcas: MarcaControl[];
+  ahora: { estado: string; paralelas: MarcaControl[]; marca: MarcaControl | null };
+  formId: number | null;
+  ocupado: boolean;
+  setFormId: (id: number | null) => void;
+  onMarcar: (accion: Accion, casoId?: number | null, tipoId?: number | null) => void;
+  onActividad: (input: ActividadNueva) => Promise<boolean>;
+}) {
+  const sesion = ahora.paralelas.find((marca) => marca.tipoId === tipo.id);
+  return (
+    <Boton
+      disabled={ocupado || (!sesion && tipo.unaVez && marcas.some((m) => m.tipoId === tipo.id))}
+      fuerte={Boolean(sesion)}
+      onClick={() => {
+        if (sesion && !tipo.pideContacto && !tipo.pideProceso) {
+          onMarcar("soltar", null, tipo.id);
+          return;
+        }
+        if (tipo.pideContacto || tipo.pideProceso || sesion) setFormId(formId === tipo.id ? null : tipo.id);
+        else void onActividad({ tipoId: tipo.id, contacto: "", telefono: "", placaLibre: "", sinProceso: false, casoId: null, nota: "" });
+      }}
+    >
+      {sesion && tipo.pideContacto ? `Otra persona · ${tipo.nombre.replace(/^Atención por /i, "")}` : tipo.nombre}
+    </Boton>
   );
 }
 
@@ -828,17 +892,16 @@ function Tipificaciones({
           {abierto ? "Cerrar" : "Nueva"}
         </button>
       </div>
-      <p className="mt-1 text-sm text-ink-soft">La de base es la que se marca sola cuando terminan otra. Elígela aquí. Break son 10 minutos y almuerzo una hora: el contador corre al revés.</p>
+      <p className="mt-1 text-sm text-ink-soft">Cada gestión se empieza y se termina. Ninguna queda abierta sola. Break son 10 minutos y almuerzo una hora: el contador corre al revés.</p>
       <ul className="mt-3 grid gap-2">
         {tipos.map((tipo) => (
           <li key={tipo.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <button type="button" onClick={() => cargar(tipo)} className="text-left font-semibold">
               {tipo.nombre}
-              {tipo.predeterminada ? " · de base" : ""}
               <span className="mt-0.5 block font-normal text-ink-soft">
                 {tipo.todos ? "Todo el equipo" : tipo.slugs.map((slug) => gente.find((persona) => persona.slug === slug)?.name.split(" ")[0] ?? slug).join(", ") || "Nadie"}
                 {tipo.pideContacto ? " · pide nombre y teléfono" : ""}
-                {tipo.paralela ? " · al tiempo con la de base" : ""}
+                {tipo.paralela ? " · se puede al tiempo" : ""}
                 {tipo.pideProceso ? " · pide el proceso" : ""}
                 {tipo.minutos > 0 ? ` · ${tipo.minutos} min` : ""}
               </span>
@@ -861,21 +924,20 @@ function Tipificaciones({
           }}
         >
           <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre. Por ejemplo, Pegar distintivos" className="h-11 rounded-2xl border border-line px-3 text-sm" />
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={pideContacto} onChange={(e) => { setPideContacto(e.target.checked); if (e.target.checked && !predeterminada) setParalela(true); }} /> Pide nombre y teléfono. La placa va si la tiene.</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={pideContacto} onChange={(e) => { setPideContacto(e.target.checked); if (e.target.checked) setParalela(true); }} /> Pide nombre y teléfono. La placa va si la tiene.</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={pideProceso} onChange={(e) => setPideProceso(e.target.checked)} /> Pide el proceso, o decir que todavía no está activo.</label>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={paralela} disabled={predeterminada} onChange={(e) => setParalela(e.target.checked)} />
-            Se hace al tiempo con la de base. Por ejemplo, seguir llamando mientras se atiende WhatsApp.
+            <input type="checkbox" checked={paralela} onChange={(e) => setParalela(e.target.checked)} />
+            Se puede hacer al tiempo con otra gestión. Por ejemplo, WhatsApp mientras se llama.
           </label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={unaVez} onChange={(e) => setUnaVez(e.target.checked)} /> Solo una vez al día.</label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={predeterminada} onChange={(e) => { setPredeterminada(e.target.checked); if (e.target.checked) { setTodos(true); setParalela(false); } }} /> Esta es la de base. Al terminar otra, se marca sola y quedan en ella.</label>
           <label className="text-sm font-medium">
             Minutos. 0 es sin límite.
             <input type="number" min={0} max={240} value={minutos} onChange={(e) => setMinutos(Number(e.target.value))} className="mt-1 h-11 w-full rounded-2xl border border-line px-3" />
           </label>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={todos} disabled={predeterminada} onChange={(e) => setTodos(e.target.checked)} />
-            {predeterminada ? "La de base es para todo el equipo" : "Para todo el equipo"}
+            <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />
+            Para todo el equipo
           </label>
           {todos ? null : (
             <div className="grid gap-1">
@@ -987,8 +1049,8 @@ function textoAhora(marcas: MarcaControl[], tipos: TipoActividad[], slug: string
     .join(" · ");
   const primera = ahora.marca ? atencionesDe(ahora.marca)[0] : undefined;
   let texto =
-    ahora.estado === "adentro" && base
-      ? `${base.nombre} · desde ${ahora.desde}${junto ? ` · también ${junto}` : ""}`
+    ahora.estado === "adentro"
+      ? `Adentro · desde ${ahora.desde}${junto ? ` · también ${junto}` : ""}`
       : ahora.estado === "actividad" && ahora.marca
         ? `${ahora.marca.nombreTipo || "En tarea"}${primera?.contacto || ahora.marca.contacto ? ` · ${primera?.contacto || ahora.marca.contacto}` : ""}${primera?.placaLibre || ahora.marca.placaLibre || ahora.marca.placa ? ` · ${primera?.placaLibre || ahora.marca.placaLibre || ahora.marca.placa}` : ""} · desde ${ahora.desde}`
         : ahora.estado === "visita"
@@ -997,7 +1059,7 @@ function textoAhora(marcas: MarcaControl[], tipos: TipoActividad[], slug: string
             ? `${ahora.marca.nota} · ${ahora.desde}`
             : `${etiquetaEstado(ahora.estado)}${ahora.desde ? ` · ${ahora.desde}` : ""}`;
   if (aviso && (ahora.estado === "break" || ahora.estado === "almuerzo" || ahora.estado === "actividad")) texto = aviso;
-  else if (aviso && ahora.estado === "adentro") texto = `${base?.nombre ?? "Adentro"} · ${aviso.charAt(0).toLowerCase()}${aviso.slice(1)}${junto ? ` · también ${junto}` : ""}`;
+  else if (aviso && ahora.estado === "adentro") texto = `Adentro · ${aviso.charAt(0).toLowerCase()}${aviso.slice(1)}${junto ? ` · también ${junto}` : ""}`;
   else if (aviso) texto = aviso;
   return { ahora, base, aviso, texto };
 }

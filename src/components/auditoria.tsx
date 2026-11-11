@@ -34,7 +34,7 @@ export function AuditoriaVista({ veClaves }: { veClaves: boolean }) {
     <section>
       <h1 className="text-lg font-semibold">Registro</h1>
       <p className="mt-1 max-w-2xl text-sm text-ink-soft">
-        Cada cambio queda con quién lo hizo, a qué hora y qué decía antes. Una letra, un estado, una clave, una marca. Nada se borra de aquí.
+        Cada cambio de un proceso queda con quién lo hizo y a qué hora. La entrada, la salida y el cambio de acceso no se anotan aquí.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         {filtros.map((item) => (

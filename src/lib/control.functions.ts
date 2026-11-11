@@ -34,10 +34,11 @@ function ciudadDe(profile: { role: string; ciudad_id: number | null; ciudad_vist
 
 async function asegurarTipos(ciudadId: number) {
   const sql = await getSql();
+  await sql.query(`update control_tipos set predeterminada = 0 where ciudad_id = $1 and predeterminada = 1`, [ciudadId]);
   const ya = await sql.query<{ id: number }>(`select id from control_tipos where ciudad_id = $1 and activo = 1 limit 1`, [ciudadId]);
   if (ya[0]) return;
   await sql.query(
-    `insert into control_tipos (ciudad_id, nombre, predeterminada, todos) values ($1, 'Llamando', 1, 1)`,
+    `insert into control_tipos (ciudad_id, nombre, predeterminada, todos) values ($1, 'Llamando', 0, 1)`,
     [ciudadId],
   );
   await sql.query(
@@ -163,12 +164,6 @@ async function guardarClaveVisible(userId: string, clave: string) {
      on conflict (user_id) do update set clave = excluded.clave, updated_at = now()`,
     [userId, clave],
   );
-}
-
-async function anotarControl(actor: { user_id: string; slug: string; name: string }, slug: string | undefined, detalle: string) {
-  const { anotar } = await import("./auditoria.server");
-  const deQuien = slug && slug !== actor.slug ? `${slug}: ` : "";
-  await anotar(actor, { accion: "marco", entidad: "control", etiqueta: slug || actor.slug, detalle: `${deQuien}${detalle}` });
 }
 
 function aMarca(row: {
@@ -371,7 +366,7 @@ export const guardarTipo = createServerFn({ method: "POST" })
     const nombre = data.nombre.trim().slice(0, 40);
     if (nombre.length < 2) throw new Error("Ponle un nombre");
     const minutos = Math.max(0, Math.min(240, Math.trunc(Number(data.minutos) || 0)));
-    const predeterminada = Boolean(data.predeterminada);
+    const predeterminada = false;
     const paralela = predeterminada ? false : Boolean(data.paralela);
     const todos = predeterminada ? true : Boolean(data.todos);
     const slugs = [...new Set(data.slugs.map((slug) => slug.trim()).filter(Boolean))];
@@ -499,28 +494,14 @@ export const marcarControl = createServerFn({ method: "POST" })
     }
 
     if (data.accion === "volver") {
-      if (exclusivas.length === 0) throw new Error("No hay una salida abierta");
-      const ciudad = ciudadDe(profile);
-      const bases = await sql.query<{ id: number; nombre: string }>(
-        `select id, nombre from control_tipos where ciudad_id = $1 and activo = 1 and predeterminada = 1 order by id limit 1`,
-        [ciudad],
-      );
-      const base = bases[0];
-      if (!base) throw new Error("En Tipificaciones marca una como la de base. A esa vuelven y esa se anota.");
+      if (exclusivas.length === 0) throw new Error("No hay una gestión abierta");
       await cerrar(exclusivas.map((fila) => Number(fila.id)));
-      await sql.query(
-        `insert into control_marcas (owner_id, tipo, fecha, hora, hora_fin, tipo_id, nota)
-         values ($1, 'actividad', $2, $3, $3, $4, 'Volvió')`,
-        [ownerId, fecha, hora, base.id],
-      );
-      await anotarControl(profile, data.slug, `volvió a ${base.nombre} a las ${hora} (${fecha})`);
       return { ok: true };
     }
     if (data.accion === "soltar") {
       const cuales = paralelas.filter((fila) => !data.tipoId || Number(fila.tipo_id) === Number(data.tipoId));
       if (cuales.length === 0) throw new Error("Esa gestión no está abierta");
       await cerrar(cuales.map((fila) => Number(fila.id)));
-      await anotarControl(profile, data.slug, `dejó esa gestión a las ${hora} (${fecha})`);
       return { ok: true };
     }
     if (data.accion === "ingreso") {
@@ -530,7 +511,6 @@ export const marcarControl = createServerFn({ method: "POST" })
         `insert into control_marcas (owner_id, tipo, fecha, hora, hora_fin) values ($1, 'ingreso', $2, $3, $3)`,
         [ownerId, fecha, hora],
       );
-      await anotarControl(profile, data.slug, `marcó entrada a las ${hora} (${fecha})`);
       return { ok: true };
     }
     if (data.accion === "salida") {
@@ -540,7 +520,6 @@ export const marcarControl = createServerFn({ method: "POST" })
         `insert into control_marcas (owner_id, tipo, fecha, hora, hora_fin) values ($1, 'salida', $2, $3, $3)`,
         [ownerId, fecha, hora],
       );
-      await anotarControl(profile, data.slug, `marcó salida a las ${hora} (${fecha})`);
       return { ok: true };
     }
     if (ultimo !== "ingreso") throw new Error("Primero marca la entrada");
@@ -548,7 +527,6 @@ export const marcarControl = createServerFn({ method: "POST" })
       const dueños = await sql.query<{ slug: string }>(`select slug from profiles where user_id = $1`, [ownerId]);
       const slug = dueños[0]?.slug ?? "";
       const tipo = await tipoPermitido(Number(data.tipoId), slug);
-      if (tipo.predeterminada) throw new Error("Esa es la actividad de base. Quedan en ella cuando vuelven, no se marca.");
       const contacto = (data.contacto ?? "").trim().slice(0, 80);
       const telefono = telefonoLimpio(data.telefono ?? "");
       const placaLibre = (data.placaLibre ?? "").trim().toUpperCase().slice(0, 8);
@@ -560,7 +538,6 @@ export const marcarControl = createServerFn({ method: "POST" })
       const misma = tipo.paralela ? paralelas.find((fila) => Number(fila.tipo_id) === tipo.id) : undefined;
       if (misma && tipo.pideContacto) {
         await guardarAtencion(Number(misma.id), contacto, telefono, placaLibre, nota, hora);
-        await anotarControl(profile, data.slug, `anotó en ${tipo.nombre} a ${contacto} (${telefono}) a las ${hora}`);
         return { ok: true };
       }
       if (tipo.unaVez) {
@@ -589,12 +566,11 @@ export const marcarControl = createServerFn({ method: "POST" })
       );
       const marcaId = Number(creadas[0]?.id);
       if (tipo.pideContacto && marcaId) await guardarAtencion(marcaId, contacto, telefono, placaLibre, nota, hora);
-      await anotarControl(profile, data.slug, `pasó a ${tipo.nombre} a las ${hora} (${fecha})${contacto ? ` con ${contacto}` : ""}${tipo.paralela ? " sin dejar de llamar" : ""}`);
       return { ok: true };
     }
     if (data.accion === "break" || data.accion === "almuerzo") {
       const ya = await sql.query<{ id: number }>(
-        `select id from control_marcas where owner_id = $1 and fecha = $2 and tipo = $3 limit 1`,
+        `select id from control_marcas where owner_id = $1 and fecha = $2 and tipo = $3 and (hora_fin = '' or hora_fin > hora) limit 1`,
         [ownerId, fecha, data.accion],
       );
       if (ya[0]) throw new Error(data.accion === "break" ? "Ya tiene el break del día" : "Ya tiene el almuerzo del día");
@@ -610,7 +586,6 @@ export const marcarControl = createServerFn({ method: "POST" })
       `insert into control_marcas (owner_id, tipo, fecha, hora, caso_id) values ($1, $2, $3, $4, $5)`,
       [ownerId, data.accion, fecha, hora, casoId],
     );
-    await anotarControl(profile, data.slug, `marcó ${data.accion} a las ${hora} (${fecha})`);
     return { ok: true };
   });
 
@@ -726,7 +701,6 @@ export const agregarMarca = createServerFn({ method: "POST" })
     let paralela = false;
     if (data.tipo === "actividad") {
       const tipo = await tipoPermitido(Number(data.tipoId), dueño.slug);
-      if (tipo.predeterminada) throw new Error("Esa es la actividad de base. No se marca.");
       tipoId = tipo.id;
       paralela = tipo.paralela;
       contacto = (data.contacto ?? "").trim().slice(0, 80);
@@ -740,7 +714,7 @@ export const agregarMarca = createServerFn({ method: "POST" })
     }
     if (data.tipo === "break" || data.tipo === "almuerzo") {
       const ya = await sql.query<{ id: number }>(
-        `select id from control_marcas where owner_id = $1 and fecha = $2 and tipo = $3 limit 1`,
+        `select id from control_marcas where owner_id = $1 and fecha = $2 and tipo = $3 and (hora_fin = '' or hora_fin > hora) limit 1`,
         [dueño.user_id, data.fecha, data.tipo],
       );
       if (ya[0]) throw new Error(data.tipo === "break" ? "Ya tiene el break del día. Solo es uno." : "Ya tiene el almuerzo del día. Solo es uno.");
@@ -755,13 +729,6 @@ export const agregarMarca = createServerFn({ method: "POST" })
       );
       if (misma[0]) {
         await guardarAtencion(Number(misma[0].id), contacto, telefono, placaLibre, nota, data.hora);
-        const { anotar } = await import("./auditoria.server");
-        await anotar(profile, {
-          accion: "agrego",
-          entidad: "control",
-          etiqueta: data.slug,
-          detalle: `Anotó en ${data.slug} a ${contacto} (${telefono}) a las ${data.hora}`,
-        });
         return { ok: true };
       }
     }
@@ -796,13 +763,6 @@ export const agregarMarca = createServerFn({ method: "POST" })
     if (data.tipo === "actividad" && contacto && creadas[0]) {
       await guardarAtencion(Number(creadas[0].id), contacto, telefono, placaLibre, nota, data.hora);
     }
-    const { anotar } = await import("./auditoria.server");
-    await anotar(profile, {
-      accion: "agrego",
-      entidad: "control",
-      etiqueta: data.slug,
-      detalle: `Registró en ${data.slug} un ${data.tipo} del ${data.fecha} de ${data.hora}${horaFin ? ` a ${horaFin}` : ""}${nota ? `: ${nota}` : ""}`,
-    });
     return { ok: true };
   });
 
@@ -817,24 +777,7 @@ export const borrarMarca = createServerFn({ method: "POST" })
     const profile = await profileFor(context.userId);
     if (!profile || !veElEquipo(profile.role)) throw new Error("Solo coordinación quita marcas");
     const sql = await getSql();
-    const previas = await sql.query<{ slug: string; tipo: string; fecha: string; hora: string; nota: string }>(
-      `select p.slug, m.tipo, m.fecha, m.hora, m.nota
-       from control_marcas m join profiles p on p.user_id = m.owner_id
-       where m.id = $1`,
-      [id],
-    );
     await sql.query(`delete from control_marcas where id = $1`, [id]);
-    const previa = previas[0];
-    const { anotar } = await import("./auditoria.server");
-    await anotar(profile, {
-      accion: "borro",
-      entidad: "control",
-      entidadId: id,
-      etiqueta: previa?.slug ?? "",
-      detalle: previa
-        ? `Quitó la marca ${previa.tipo} de ${previa.slug} del ${String(previa.fecha).slice(0, 10)} a las ${String(previa.hora).slice(0, 5)}${previa.nota ? ` (${previa.nota})` : ""}`
-        : `Quitó la marca ${id}`,
-    });
     return { ok: true };
   });
 
@@ -990,14 +933,6 @@ export const guardarAcceso = createServerFn({ method: "POST" })
       [rol, accesoJson(acceso), data.slug],
     );
     if (!changed[0]) throw new Error("No encontré a esa persona");
-    const { anotar } = await import("./auditoria.server");
-    await anotar(profile, {
-      accion: "edito",
-      entidad: "equipo",
-      etiqueta: data.slug,
-      detalle: `Cambió el acceso de ${data.slug}: ${rol}. Secciones: ${acceso.secciones.join(", ")}`,
-      despues: accesoJson(acceso),
-    });
     return { ok: true };
   });
 

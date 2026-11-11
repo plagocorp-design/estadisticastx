@@ -38,6 +38,13 @@ export type Caso = {
   marca: string;
   linea: string;
   modelo: string;
+  capacidad: string;
+  clase: string;
+  carroceria: string;
+  motor: string;
+  serie: string;
+  cilindraje: string;
+  servicio: string;
   fechaFirma: string;
   fechaPoliza: string;
   fechaCompra: string;
@@ -94,6 +101,13 @@ export type CasoDraft = {
   marca?: string;
   linea?: string;
   modelo?: string;
+  capacidad?: string;
+  clase?: string;
+  carroceria?: string;
+  motor?: string;
+  serie?: string;
+  cilindraje?: string;
+  servicio?: string;
   fechaFirma?: string;
   contratoNombre?: string;
   contratoPdf?: string;
@@ -221,6 +235,13 @@ export function toCaso(row: CasoRow): Caso {
     marca: row.marca ?? "",
     linea: row.linea ?? "",
     modelo: row.modelo ?? "",
+    capacidad: String(row.capacidad ?? ""),
+    clase: String(row.clase ?? ""),
+    carroceria: String(row.carroceria ?? ""),
+    motor: String(row.motor ?? ""),
+    serie: String(row.serie ?? ""),
+    cilindraje: String(row.cilindraje ?? ""),
+    servicio: String(row.servicio ?? ""),
     fechaFirma: row.fecha_firma ?? "",
     fechaPoliza: row.fecha_poliza ?? "",
     fechaCompra: String(row.fecha_compra ?? ""),

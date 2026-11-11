@@ -11,34 +11,52 @@ async function textoPdf(data: Buffer) {
   return Array.isArray(extraido.text) ? extraido.text.join("\n") : extraido.text;
 }
 
-let lector: Promise<{ recognize: (image: Buffer) => Promise<{ data: { text: string } }> }> | null = null;
+type Lector = {
+  recognize: (image: Buffer) => Promise<{ data: { text: string } }>;
+  setParameters: (params: Record<string, string | number>) => Promise<unknown>;
+};
+
+let lector: Promise<Lector> | null = null;
+
+async function prepararFotos(data: Buffer) {
+  const cargado = await import("sharp");
+  const sharp = typeof cargado.default === "function" ? cargado.default : (cargado as unknown as typeof cargado.default);
+  const base = () => sharp(data, { failOn: "none" }).rotate().resize({ width: 2200, height: 2200, fit: "inside", withoutEnlargement: false });
+  const normal = await base().grayscale().normalize().sharpen().png().toBuffer();
+  const contraste = await base().grayscale().linear(1.5, -30).normalize().sharpen().png().toBuffer();
+  return [normal, contraste];
+}
 
 async function textoFoto(data: Buffer) {
   const { createWorker, PSM } = await import("tesseract.js");
-  let lista = data;
+  let imagenes = [data];
   try {
-    const cargado = await import("sharp");
-    const sharp = typeof cargado.default === "function" ? cargado.default : (cargado as unknown as typeof cargado.default);
-    lista = await sharp(data, { failOn: "none" })
-      .rotate()
-      .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
-      .grayscale()
-      .normalize()
-      .png()
-      .toBuffer();
+    imagenes = await prepararFotos(data);
   } catch {
     if (data.length > 8_000_000) return "";
   }
   if (!lector) {
     lector = createWorker("spa", 1, { cachePath: "/tmp/tessdata" }).then(async (worker) => {
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
-      return worker;
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+      return worker as Lector;
     });
   }
   try {
     const worker = await lector;
-    const { data: leido } = await worker.recognize(lista);
-    return leido.text || "";
+    if (!worker) throw new Error("No pude leer la foto");
+    const partes: string[] = [];
+    for (const imagen of imagenes) {
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+      const primero = await worker.recognize(imagen);
+      let texto = primero.data.text || "";
+      if (texto.trim().length < 24) {
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+        const segundo = await worker.recognize(imagen);
+        if ((segundo.data.text || "").trim().length > texto.trim().length) texto = segundo.data.text || "";
+      }
+      if (texto.trim()) partes.push(texto);
+    }
+    return partes.join("\n");
   } catch (err) {
     lector = null;
     throw err;

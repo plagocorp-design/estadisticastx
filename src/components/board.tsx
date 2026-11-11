@@ -6,6 +6,7 @@ import { listAgenda } from "@/lib/agenda.functions";
 import { type AgendaItem } from "@/lib/agenda";
 import { AgendaView } from "@/components/agenda";
 import { ChatCaso } from "@/components/chat-caso";
+import { EditorHojas } from "@/components/editor-hojas";
 import { BitacoraVista } from "@/components/bitacora";
 import { ControlVista } from "@/components/control";
 import { CallCenterVista } from "@/components/callcenter";
@@ -16,7 +17,7 @@ import { certificadoProceso } from "@/lib/certificado.functions";
 import { EnviarFirma } from "@/components/enviar-firma";
 import { sincronizarDocuseal, verAuditoriaFirma } from "@/lib/firma.functions";
 import { leerDocumento, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
-import { enviarEnTrozos, prepararArchivo } from "@/lib/archivo";
+import { enviarEnTrozos, prepararArchivo, prepararParaLeer } from "@/lib/archivo";
 import type { CampoLeido } from "@/lib/ocr";
 import { listEquipo } from "@/lib/control.functions";
 import type { PersonaEquipo } from "@/lib/control";
@@ -38,6 +39,7 @@ import {
   removeCaso,
   updateCaso,
   verContrato,
+  pasarProceso,
   type CasoPatch,
   type Me,
 } from "@/lib/casos.functions";
@@ -64,7 +66,8 @@ import { ASESORES, accesoDe, configura, esBandeja, esGerencia, etiquetaRol, llev
 import { BloquePiloto } from "@/components/piloto";
 import { GerenciaVista } from "@/components/gerencia";
 import { configMia, entrarCiudad, leerPasosExtra, marcarPasoExtra, salirCiudad } from "@/lib/gerencia.functions";
-import { consultarTarjeta, type EstadoTarjetaOficial } from "@/lib/tarjeta.functions";
+import { CartaDevolucion } from "@/components/carta-devolucion";
+import { AvisoTarjeta, avisoSugerido } from "@/components/aviso-tarjeta";
 import { estadoPiloto, pasarMano } from "@/lib/piloto.functions";
 import { etiquetaMarca, marcasDe } from "@/lib/piloto";
 import { buscarEmpresas, unificarEmpresa } from "@/lib/empresas";
@@ -1508,6 +1511,8 @@ function Panel({
   const [aviso, setAviso] = useState("");
   const [fotosApertura, setFotosApertura] = useState<FotoApertura[]>([]);
   const [leyendoFoto, setLeyendoFoto] = useState("");
+  const [editorFotos, setEditorFotos] = useState(false);
+  const [hojasArmadas, setHojasArmadas] = useState<{ nombre: string; archivo: string }[]>([]);
   const [choques, setChoques] = useState<CampoLeido[]>([]);
   const [borrar, setBorrar] = useState(false);
   const [certificando, setCertificando] = useState(false);
@@ -1516,6 +1521,7 @@ function Panel({
   const ownerRef = useRef(ownerSlug);
   const pdfRef = useRef({ pdf: pdfNuevo, nombre: nombrePdf });
   const ultimoRef = useRef("");
+  const pasadoRef = useRef(false);
   const ocupadoRef = useRef(false);
   const colaRef = useRef(false);
   const arranqueRef = useRef(false);
@@ -1629,6 +1635,13 @@ function Panel({
       marca: actual.marca,
       linea: actual.linea,
       modelo: actual.modelo,
+      capacidad: actual.capacidad,
+      clase: actual.clase,
+      carroceria: actual.carroceria,
+      motor: actual.motor,
+      serie: actual.serie,
+      cilindraje: actual.cilindraje,
+      servicio: actual.servicio,
       fechaFirma: actual.fechaFirma,
       fechaCompra: actual.fechaCompra,
       citaFecha: actual.citaFecha,
@@ -1642,7 +1655,7 @@ function Panel({
 
   async function persistir() {
     const actual = formRef.current;
-    if (!actual || !canEdit) return;
+    if (!actual || !canEdit || pasadoRef.current) return;
     const firma = firmaActual();
     if (!firma || firma === ultimoRef.current) return;
     if (ocupadoRef.current) {
@@ -1686,6 +1699,13 @@ function Panel({
       marca: actual.marca,
       linea: actual.linea,
       modelo: actual.modelo,
+      capacidad: actual.capacidad,
+      clase: actual.clase,
+      carroceria: actual.carroceria,
+      motor: actual.motor,
+      serie: actual.serie,
+      cilindraje: actual.cilindraje,
+      servicio: actual.servicio,
       fechaFirma: actual.fechaFirma,
       fechaCompra: actual.fechaCompra,
       citaFecha: actual.citaFecha,
@@ -1765,6 +1785,9 @@ function Panel({
           data: { casoId: id, tipo: foto.tipo, nombre: foto.nombre, archivo: foto.archivo, lectura: foto.lectura },
         });
       }
+      for (const hoja of hojasArmadas) {
+        await guardarComoDocumento(id, "unificado", hoja.nombre, hoja.archivo, "");
+      }
       if (draft.contratoPdf && draft.contratoPdf.length > 80) {
         await guardarComoDocumento(id, "contrato", draft.contratoNombre || "contrato.pdf", draft.contratoPdf, "");
       }
@@ -1788,6 +1811,12 @@ function Panel({
     setAviso("");
     try {
       const listo = await prepararArchivo(file);
+      let paraLeer = listo;
+      try {
+        paraLeer = await prepararParaLeer(file);
+      } catch {
+        paraLeer = listo;
+      }
       const archivo = listo.archivo;
       const actual = {
         placa: draft.placa,
@@ -1799,9 +1828,16 @@ function Panel({
         marca: draft.marca ?? "",
         linea: draft.linea ?? "",
         modelo: draft.modelo ?? "",
+        capacidad: draft.capacidad ?? "",
+        clase: draft.clase ?? "",
+        carroceria: draft.carroceria ?? "",
+        motor: draft.motor ?? "",
+        serie: draft.serie ?? "",
+        cilindraje: draft.cilindraje ?? "",
+        servicio: draft.servicio ?? "",
         empresa: draft.empresa,
       };
-      const leida = await leerDocumento({ data: { tipo, nombre: listo.nombre, archivo, actual } });
+      const leida = await leerDocumento({ data: { tipo, nombre: paraLeer.nombre, archivo: paraLeer.archivo, actual } });
       const llenos: Partial<CasoDraft> = {};
       const distintos: CampoLeido[] = [];
       for (const campo of leida.campos) {
@@ -2002,6 +2038,10 @@ function Panel({
   }
 
   const tel = form ? celular(form.telefono) : "";
+  function srcFoto(tipo: string) {
+    const foto = fotosApertura.find((item) => item.tipo === tipo);
+    return foto ? `data:image/jpeg;base64,${foto.archivo}` : "";
+  }
   function tiposParte(parte: string) {
     if (!docsCfg.length) {
       return parte === "Documentos"
@@ -2057,15 +2097,19 @@ function Panel({
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {!caso ? (
+            <>
             <form id="nuevo" onSubmit={create} className="grid gap-3">
               <div className="grid gap-2 rounded-2xl border border-line bg-paper p-3">
                 <p className="text-sm font-semibold">Abre el seguimiento con las fotos</p>
                 <p className="text-sm text-ink-soft">Cédula por las dos caras, tarjeta de propiedad por las dos caras y tarjeta de operación. Esas fotos quedan guardadas en los documentos. El celular no sale en la foto: escríbelo tú.</p>
-                <FotoApertura etiqueta="Cédula, frente" lista={fotosApertura.some((foto) => foto.tipo === "cedula_frente")} leyendo={leyendoFoto === "cedula_frente"} onFile={(file) => void leerApertura("cedula_frente", file)} />
-                <FotoApertura etiqueta="Cédula, reverso" lista={fotosApertura.some((foto) => foto.tipo === "cedula_reverso")} leyendo={leyendoFoto === "cedula_reverso"} onFile={(file) => void leerApertura("cedula_reverso", file)} />
-                <FotoApertura etiqueta="Tarjeta de propiedad, frente" lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_frente")} leyendo={leyendoFoto === "tarjeta_propiedad_frente"} onFile={(file) => void leerApertura("tarjeta_propiedad_frente", file)} />
-                <FotoApertura etiqueta="Tarjeta de propiedad, reverso" lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_reverso")} leyendo={leyendoFoto === "tarjeta_propiedad_reverso"} onFile={(file) => void leerApertura("tarjeta_propiedad_reverso", file)} />
-                <FotoApertura etiqueta="Tarjeta de operación" lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion"} onFile={(file) => void leerApertura("tarjeta_operacion", file)} />
+                <FotoApertura etiqueta="Cédula, frente" src={srcFoto("cedula_frente")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_frente")} leyendo={leyendoFoto === "cedula_frente"} onFile={(file) => void leerApertura("cedula_frente", file)} />
+                <FotoApertura etiqueta="Cédula, reverso" src={srcFoto("cedula_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_reverso")} leyendo={leyendoFoto === "cedula_reverso"} onFile={(file) => void leerApertura("cedula_reverso", file)} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, frente" src={srcFoto("tarjeta_propiedad_frente")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_frente")} leyendo={leyendoFoto === "tarjeta_propiedad_frente"} onFile={(file) => void leerApertura("tarjeta_propiedad_frente", file)} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, reverso" src={srcFoto("tarjeta_propiedad_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_reverso")} leyendo={leyendoFoto === "tarjeta_propiedad_reverso"} onFile={(file) => void leerApertura("tarjeta_propiedad_reverso", file)} />
+                <FotoApertura etiqueta="Tarjeta de operación" src={srcFoto("tarjeta_operacion")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion"} onFile={(file) => void leerApertura("tarjeta_operacion", file)} />
+                <button type="button" disabled={fotosApertura.length === 0} onClick={() => setEditorFotos(true)} className="h-11 rounded-2xl border border-line bg-card px-3 text-sm font-semibold disabled:opacity-50">
+                  {hojasArmadas.length ? `Hojas armadas: ${hojasArmadas.length}. Acomodar otra vez` : "Acomodar estas fotos en hojas"}
+                </button>
               </div>
               {choques.map((campo) => (
                 <div key={campo.key} className="grid gap-1 rounded-2xl border border-line p-3 text-sm">
@@ -2103,10 +2147,29 @@ function Panel({
                 marca={draft.marca}
                 linea={draft.linea}
                 modelo={draft.modelo}
+                capacidad={draft.capacidad}
+                clase={draft.clase}
+                carroceria={draft.carroceria}
+                motor={draft.motor}
+                serie={draft.serie}
+                cilindraje={draft.cilindraje}
+                servicio={draft.servicio}
                 fechaFirma={draft.fechaFirma}
                 onChange={(patch) => setDraft({ ...draft, ...patch })}
               />
             </form>
+            {editorFotos ? (
+              <EditorHojas
+                fotos={fotosApertura.map((foto) => ({ id: foto.tipo, nombre: foto.nombre, src: `data:image/jpeg;base64,${foto.archivo}` }))}
+                onCerrar={() => setEditorFotos(false)}
+                onGuardar={(hojas) => {
+                  setHojasArmadas(hojas);
+                  setEditorFotos(false);
+                  setAviso(hojas.length === 1 ? "Armé 1 hoja. Se guarda al crear el seguimiento." : `Armé ${hojas.length} hojas. Se guardan al crear el seguimiento.`);
+                }}
+              />
+            ) : null}
+            </>
           ) : form && vivo && area ? (
             <div className="grid gap-4">
               <div className="rounded-2xl border border-line bg-paper p-3 text-sm">
@@ -2169,6 +2232,24 @@ function Panel({
               {pestana === "inicio" || pestana === "firma" ? (
               <div className="grid content-start gap-3">
                 {pestana === "inicio" && delEquipo ? <AsesorSelect value={ownerSlug} onChange={setOwnerSlug} /> : null}
+                {canEdit && pestana === "inicio" && form.ownerId === yo ? (
+                  <PasarAsesor
+                    actual={ownerSlug}
+                    onPasar={async (slug) => {
+                      try {
+                        pasadoRef.current = true;
+                        const listo = await pasarProceso({ data: { id: form.id, slug } });
+                        setAviso(`Se lo pasaste a ${listo.ownerName}.`);
+                        await onSaved();
+                        onClose();
+                      } catch (err) {
+                        pasadoRef.current = false;
+                        onError(err instanceof Error ? err.message : "No pude pasarlo");
+                        throw err;
+                      }
+                    }}
+                  />
+                ) : null}
                 {canEdit && pestana === "inicio" ? (
                   <>
                     <Field label="Placa" value={form.placa} onChange={(v) => setForm({ ...form, placa: v.toUpperCase() })} />
@@ -2189,6 +2270,13 @@ function Panel({
                       marca={form.marca}
                       linea={form.linea}
                       modelo={form.modelo}
+                      capacidad={form.capacidad}
+                      clase={form.clase}
+                      carroceria={form.carroceria}
+                      motor={form.motor}
+                      serie={form.serie}
+                      cilindraje={form.cilindraje}
+                      servicio={form.servicio}
                       fechaFirma={form.fechaFirma}
                       onChange={(patch) => setForm({ ...form, ...patch })}
                     />
@@ -2204,6 +2292,13 @@ function Panel({
                       linea={form.linea}
                       modelo={form.modelo}
                       empresa={form.empresa}
+                      capacidad={form.capacidad}
+                      clase={form.clase}
+                      carroceria={form.carroceria}
+                      motor={form.motor}
+                      serie={form.serie}
+                      cilindraje={form.cilindraje}
+                      servicio={form.servicio}
                       copropietarios={form.copropietarios}
                       onEnviado={(id) => setForm((actual) => (actual ? { ...actual, docusealId: id, docusealEstado: "pendiente" } : actual))}
                     />
@@ -2330,6 +2425,18 @@ function Panel({
                   A Vía Seguros se pasa con los tres documentos, las dos firmas y la plata de la póliza.
                 </p>
               ) : null}
+              {pestana === "poliza" ? (
+                <CartaDevolucion
+                  empresa={form.empresa}
+                  propietario={form.nombre}
+                  cc={form.cc}
+                  telefono={form.telefono}
+                  correo={form.correo}
+                  placa={form.placa}
+                  marca={form.marca}
+                  modelo={form.modelo}
+                />
+              ) : null}
               {pestana === "tarjeta" ? (
                 <div className="grid gap-3">
                   <EstadoIntranet placa={form.placa} />
@@ -2354,6 +2461,13 @@ function Panel({
                     })}
                   </div>
                   </div>
+                  <AvisoTarjeta
+                    placa={form.placa}
+                    propietario={form.nombre}
+                    telefono={form.telefono}
+                    asesor={form.ownerName}
+                    sugerido={avisoSugerido(form)}
+                  />
                 </div>
               ) : null}
               {pestana === "cita" ? (
@@ -2778,16 +2892,19 @@ function FotoApertura({
   etiqueta,
   lista,
   leyendo,
+  src,
   onFile,
 }: {
   etiqueta: string;
   lista: boolean;
   leyendo: boolean;
+  src?: string;
   onFile: (file: File) => void;
 }) {
   return (
     <div className="grid gap-2 rounded-2xl border border-line bg-card p-3">
       <p className="text-sm font-semibold">{etiqueta}{lista ? " · lista" : ""}</p>
+      {src ? <img src={src} alt="" className="max-h-36 w-full rounded-xl bg-paper object-contain" /> : null}
       <div className="flex flex-wrap gap-2">
         <label className="inline-flex h-11 cursor-pointer items-center rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">
           {leyendo ? "Leyendo…" : "Tomar foto"}
@@ -2838,6 +2955,13 @@ function borradorVacio(): CasoDraft {
     marca: "",
     linea: "",
     modelo: "",
+    capacidad: "",
+    clase: "",
+    carroceria: "",
+    motor: "",
+    serie: "",
+    cilindraje: "",
+    servicio: "",
     fechaFirma: "",
     contratoNombre: "",
     contratoPdf: "",
@@ -2883,6 +3007,13 @@ function DatosContrato({
   marca,
   linea,
   modelo,
+  capacidad,
+  clase,
+  carroceria,
+  motor,
+  serie,
+  cilindraje,
+  servicio,
   fechaFirma,
   onChange,
 }: {
@@ -2891,18 +3022,36 @@ function DatosContrato({
   marca?: string;
   linea?: string;
   modelo?: string;
+  capacidad?: string;
+  clase?: string;
+  carroceria?: string;
+  motor?: string;
+  serie?: string;
+  cilindraje?: string;
+  servicio?: string;
   fechaFirma?: string;
   onChange: (patch: Partial<CasoDraft>) => void;
 }) {
-  if (!direccion && !correo && !marca && !linea && !modelo && !fechaFirma) return null;
   return (
     <div className="grid gap-3 rounded-2xl bg-paper p-3">
-      <p className="text-xs font-semibold tracking-wide text-ink-soft uppercase">Del contrato</p>
+      <p className="text-xs font-semibold tracking-wide text-ink-soft uppercase">Datos del vehículo</p>
+      <p className="text-xs text-ink-soft">Lo que se lee en la tarjeta de propiedad o en la de operación queda aquí y se guarda en el proceso. El contrato sale con estos datos.</p>
       <Field label="Dirección" optional value={direccion ?? ""} onChange={(v) => onChange({ direccion: v })} />
       <Field label="Correo" optional value={correo ?? ""} onChange={(v) => onChange({ correo: v })} />
-      <Field label="Marca" optional value={marca ?? ""} onChange={(v) => onChange({ marca: v })} />
-      <Field label="Línea" optional value={linea ?? ""} onChange={(v) => onChange({ linea: v })} />
-      <Field label="Modelo" optional value={modelo ?? ""} onChange={(v) => onChange({ modelo: v })} />
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Field label="Marca" optional value={marca ?? ""} onChange={(v) => onChange({ marca: v })} />
+        <Field label="Línea" optional value={linea ?? ""} onChange={(v) => onChange({ linea: v })} />
+        <Field label="Modelo" optional value={modelo ?? ""} onChange={(v) => onChange({ modelo: v })} />
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Field label="Clase" optional value={clase ?? ""} onChange={(v) => onChange({ clase: v })} />
+        <Field label="Carrocería" optional value={carroceria ?? ""} onChange={(v) => onChange({ carroceria: v })} />
+        <Field label="Motor" optional value={motor ?? ""} onChange={(v) => onChange({ motor: v })} />
+        <Field label="Serie" optional value={serie ?? ""} onChange={(v) => onChange({ serie: v })} />
+        <Field label="Cilindraje" optional value={cilindraje ?? ""} onChange={(v) => onChange({ cilindraje: v })} />
+        <Field label="Servicio" optional value={servicio ?? ""} onChange={(v) => onChange({ servicio: v })} />
+        <Field label="Pasajeros" optional value={capacidad ?? ""} onChange={(v) => onChange({ capacidad: v.replace(/\D/g, "").slice(0, 2) })} />
+      </div>
       <label className="text-sm font-medium">
         Fecha de firma
         <input
@@ -2912,6 +3061,38 @@ function DatosContrato({
           className="mt-1 h-11 w-full rounded-2xl border border-line px-3"
         />
       </label>
+    </div>
+  );
+}
+
+function PasarAsesor({ actual, onPasar }: { actual: string; onPasar: (slug: string) => Promise<void> }) {
+  const [slug, setSlug] = useState(actual);
+  const [ocupado, setOcupado] = useState(false);
+  const otros = ASESORES.filter((p) => p.slug !== actual);
+  if (!otros.length) return null;
+  return (
+    <div className="grid gap-2 rounded-2xl border border-line p-3">
+      <p className="text-sm font-semibold">Pasar este proceso</p>
+      <p className="text-xs text-ink-soft">Se lo queda el otro asesor. Tú dejas de verlo en tu lista.</p>
+      <div className="flex flex-wrap gap-2">
+        <select value={slug === actual ? otros[0].slug : slug} onChange={(e) => setSlug(e.target.value)} className="h-11 min-w-0 flex-1 rounded-2xl border border-line px-3 text-sm">
+          {otros.map((p) => (
+            <option key={p.slug} value={p.slug}>{nombreLista(p)}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={ocupado}
+          onClick={() => {
+            const destino = slug === actual ? otros[0].slug : slug;
+            setOcupado(true);
+            void onPasar(destino).catch(() => setOcupado(false));
+          }}
+          className="h-11 rounded-2xl bg-navy px-3 text-sm font-semibold text-paper disabled:opacity-60"
+        >
+          {ocupado ? "Pasando…" : "Pasar"}
+        </button>
+      </div>
     </div>
   );
 }

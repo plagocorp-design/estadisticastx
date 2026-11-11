@@ -90,7 +90,7 @@ export async function montarContrato(
     dia: fecha.dia,
     mes: fecha.mes,
     ano: fecha.ano,
-    capacidad: "",
+    capacidad: datos.capacidad ? `${datos.capacidad} PASAJEROS` : "",
   };
 
   if (plantilla?.campos.length) {
@@ -113,6 +113,7 @@ export async function montarContrato(
     texto(pagina, datos.carroceria, 292, 696, 7);
     texto(pagina, datos.cilindraje, 446, 696, 8);
     texto(pagina, datos.placa, 92, 678, 9);
+    if (datos.capacidad) texto(pagina, `${datos.capacidad} PASAJEROS`, 250, 678, 8);
     texto(firma, datos.correo, 126, 376, 8);
     texto(firma, fecha.dia, 110, 346, 8);
     texto(firma, fecha.mes, 193, 346, 8);
@@ -122,6 +123,9 @@ export async function montarContrato(
     texto(datosPersonales, fecha.ano, 423, 510, 10);
     texto(datosPersonales, datos.telefono, 102, 471, 10);
     texto(datosPersonales, datos.direccion, 108, 446, 9);
+  }
+  if (plantilla?.campos.length && !plantilla.campos.some((campo) => campo.campo === "capacidad") && datos.capacidad) {
+    texto(pagina, `${datos.capacidad} PASAJEROS`, 250, 678, 8);
   }
 
   const sitioFirma = plantilla?.campos.find((campo) => campo.campo === "firma");

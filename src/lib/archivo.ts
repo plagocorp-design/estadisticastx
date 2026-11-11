@@ -49,6 +49,35 @@ export async function prepararArchivo(file: File) {
   return { nombre: file.name || "archivo", archivo: await leerBase64(file) };
 }
 
+export async function prepararParaLeer(file: File) {
+  if (!file.type.startsWith("image/")) {
+    return { nombre: file.name || "documento", archivo: await leerBase64(file) };
+  }
+  const bitmap = await createImageBitmap(file);
+  const maxLado = 2000;
+  const escala = Math.min(1, maxLado / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * escala));
+  const h = Math.max(1, Math.round(bitmap.height * escala));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("No pude preparar la foto");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  let calidad = 0.82;
+  let blob: Blob | null = null;
+  for (; calidad >= 0.45; calidad -= 0.12) {
+    blob = await new Promise((resolve) => canvas.toBlob((item) => resolve(item), "image/jpeg", calidad));
+    if (blob && blob.size <= 380_000) break;
+  }
+  if (!blob) throw new Error("No pude preparar la foto para leerla");
+  const base = file.name.replace(/\.[^.]+$/, "") || "foto";
+  return { nombre: `${base}.jpg`, archivo: await leerBase64(blob) };
+}
+
 export async function enviarEnTrozos(archivo: string, mandar: (orden: number, datos: string, fin: boolean) => Promise<void>) {
   const n = Math.max(1, Math.ceil(archivo.length / TOPE_ENVIO) || 1);
   for (let i = 0; i < n; i++) {
