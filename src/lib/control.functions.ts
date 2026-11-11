@@ -528,11 +528,12 @@ export const marcarControl = createServerFn({ method: "POST" })
       const dueños = await sql.query<{ slug: string }>(`select slug from profiles where user_id = $1`, [ownerId]);
       const slug = dueños[0]?.slug ?? "";
       const tipo = await tipoPermitido(Number(data.tipoId), slug);
-      const contacto = (data.contacto ?? "").trim().slice(0, 80);
+      const contactoInicial = (data.contacto ?? "").trim().slice(0, 80);
       const telefono = telefonoLimpio(data.telefono ?? "");
       const placaLibre = (data.placaLibre ?? "").trim().toUpperCase().slice(0, 8);
       const nota = (data.nota ?? "").trim().slice(0, 160);
-      if (tipo.pideContacto) {
+      const contacto = tipo.pideContacto && tipo.paralela && contactoInicial.length < 2 ? "Sin nombre" : contactoInicial;
+      if (tipo.pideContacto && !tipo.paralela) {
         if (contacto.length < 2) throw new Error("Falta el nombre de la persona");
         if (telefono.length < 7) throw new Error("Falta el número de teléfono");
       }
@@ -779,6 +780,35 @@ export const borrarMarca = createServerFn({ method: "POST" })
     if (!profile || !veElEquipo(profile.role)) throw new Error("Solo coordinación quita marcas");
     const sql = await getSql();
     await sql.query(`delete from control_marcas where id = $1`, [id]);
+    return { ok: true };
+  });
+
+export const editarAtencion = createServerFn({ method: "POST" })
+  .validator((input: { id: number; contacto: string; telefono: string; placaLibre: string; nota: string }) => {
+    if (!Number.isFinite(input.id) || input.id <= 0) throw new Error("Esa gestión todavía no se puede completar");
+    return input;
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const { profileFor } = await import("./team.server");
+    const profile = await profileFor(context.userId);
+    if (!profile) throw new Error("No autorizado");
+    const sql = await getSql();
+    const filas = await sql.query<{ owner_id: string }>(
+      `select m.owner_id from control_atenciones a join control_marcas m on m.id = a.marca_id where a.id = $1`,
+      [data.id],
+    );
+    const dueno = filas[0];
+    if (!dueno) throw new Error("No encontré esa gestión");
+    if (dueno.owner_id !== profile.user_id && !veElEquipo(profile.role)) throw new Error("Esa gestión es de otra persona");
+    const contacto = data.contacto.trim().slice(0, 80) || "Sin nombre";
+    const telefono = telefonoLimpio(data.telefono);
+    const placa = data.placaLibre.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+    const nota = data.nota.trim().slice(0, 160);
+    await sql.query(
+      `update control_atenciones set contacto = $1, telefono = $2, placa_libre = $3, nota = $4 where id = $5`,
+      [contacto, telefono, placa, nota, data.id],
+    );
     return { ok: true };
   });
 

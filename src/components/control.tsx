@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { agregarMarca, borrarMarca, claveExtension, exportarControl, guardarTipo, listEquipo, listMarcas, listTipos, marcarControl, quitarTipo } from "@/lib/control.functions";
+import { agregarMarca, borrarMarca, claveExtension, editarAtencion, exportarControl, guardarTipo, listEquipo, listMarcas, listTipos, marcarControl, quitarTipo } from "@/lib/control.functions";
 import {
   CUPO_MINUTOS,
   atencionesDe,
@@ -107,6 +107,21 @@ export function ControlVista({
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "No pude marcar");
+      return false;
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function completarAtencion(input: { id: number; contacto: string; telefono: string; placaLibre: string; nota: string }) {
+    setOcupado(true);
+    setError("");
+    try {
+      await editarAtencion({ data: input });
+      await cargar();
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No pude completar la gestión");
       return false;
     } finally {
       setOcupado(false);
@@ -258,10 +273,11 @@ export function ControlVista({
             onVisita={() => setVisitaDe(visitaDe === me.slug ? "" : me.slug)}
             onMarcar={(accion, casoId, tipoId) => void marcar(accion, me.slug, casoId, tipoId)}
             onActividad={(input) => marcarActividad(me.slug, input)}
+            onCompletar={completarAtencion}
             onAgregar={agregar}
             onQuitar={(id) => void quitar(id)}
           />
-          <Atenciones marcas={marcas.filter((m) => m.slug === me.slug)} gente={gente} propio />
+          <Atenciones marcas={marcas.filter((m) => m.slug === me.slug)} gente={gente} propio ocupado={ocupado} onCompletar={completarAtencion} />
           </>
         )
       ) : (
@@ -270,7 +286,7 @@ export function ControlVista({
             <Tipificaciones tipos={tipos} gente={calle} ocupado={ocupado} onGuardar={guardarActividad} onQuitar={(id) => void quitarActividad(id)} />
           ) : null}
           <Ahora gente={trabajan} marcas={marcas} tipos={tipos} hora={hora} esHoy={esHoy} />
-          <Atenciones marcas={marcas} gente={gente} />
+          <Atenciones marcas={marcas} gente={gente} ocupado={ocupado} onCompletar={completarAtencion} />
           <div className="mt-4 grid gap-3">
             {trabajan.map((persona) => (
               <Tarjeta
@@ -289,6 +305,7 @@ export function ControlVista({
                 onVisita={() => setVisitaDe(visitaDe === persona.slug ? "" : persona.slug)}
                 onMarcar={(accion, casoId, tipoId) => void marcar(accion, persona.slug, casoId, tipoId)}
                 onActividad={(input) => marcarActividad(persona.slug, input)}
+                onCompletar={completarAtencion}
                 onAgregar={agregar}
                 onQuitar={(id) => void quitar(id)}
               />
@@ -332,6 +349,7 @@ function Tarjeta({
   onVisita,
   onMarcar,
   onActividad,
+  onCompletar,
   onAgregar,
   onQuitar,
 }: {
@@ -349,6 +367,7 @@ function Tarjeta({
   onVisita: () => void;
   onMarcar: (accion: Accion, casoId?: number | null, tipoId?: number | null) => void;
   onActividad: (input: ActividadNueva) => Promise<boolean>;
+  onCompletar: (input: { id: number; contacto: string; telefono: string; placaLibre: string; nota: string }) => Promise<boolean>;
   onAgregar: (input: MarcaNueva) => Promise<boolean>;
   onQuitar: (id: number) => void;
 }) {
@@ -407,8 +426,7 @@ function Tarjeta({
                 <ul className="mt-1 grid gap-0.5 text-xs">
                   {atencionesDe(marca).map((personaAtendida) => (
                     <li key={`${marca.id}-${personaAtendida.id}-${personaAtendida.hora}-${personaAtendida.telefono}`}>
-                      {personaAtendida.hora} · {[personaAtendida.contacto, personaAtendida.telefono, personaAtendida.placaLibre].filter(Boolean).join(" · ")}
-                      {personaAtendida.nota ? ` · ${personaAtendida.nota}` : ""}
+                      <CompletarAtencion persona={personaAtendida} ocupado={ocupado} onGuardar={onCompletar} />
                     </li>
                   ))}
                 </ul>
@@ -471,6 +489,7 @@ function Tarjeta({
           abierta={ahora.paralelas.some((marca) => marca.tipoId === form.id)}
           procesos={procesos}
           ocupado={ocupado}
+          onCompletar={onCompletar}
           onCerrar={() => setFormId(null)}
           onListo={async (input) => {
             const ok = await onActividad(input);
@@ -740,6 +759,7 @@ function FormaActividad({
   abierta,
   procesos,
   ocupado,
+  onCompletar,
   onCerrar,
   onListo,
 }: {
@@ -748,6 +768,7 @@ function FormaActividad({
   abierta: boolean;
   procesos: Caso[];
   ocupado: boolean;
+  onCompletar: (input: { id: number; contacto: string; telefono: string; placaLibre: string; nota: string }) => Promise<boolean>;
   onCerrar: () => void;
   onListo: (input: ActividadNueva) => Promise<boolean>;
 }) {
@@ -784,20 +805,22 @@ function FormaActividad({
     >
       <p className="text-sm font-semibold">{abierta ? `Otra persona en ${tipo.nombre}` : tipo.nombre}</p>
       {sigue ? (
-        <p className="text-xs text-ink-soft">Llamar sigue. Agrega cada persona sin cerrar la gestión.</p>
+        <p className="text-xs text-ink-soft">Puedes empezarla sin nombre, sin número y sin placa. Cuando ya los sepas, pulsa Completar.</p>
       ) : null}
       {ya.length > 0 ? (
-        <ul className="grid gap-0.5 text-xs text-ink-soft">
+        <ul className="grid gap-1 text-xs text-ink-soft">
           {ya.map((persona) => (
-            <li key={persona.id}>{persona.hora} · {[persona.contacto, persona.telefono, persona.placaLibre].filter(Boolean).join(" · ")}</li>
+            <li key={persona.id}>
+              <CompletarAtencion persona={persona} ocupado={ocupado} onGuardar={onCompletar} />
+            </li>
           ))}
         </ul>
       ) : null}
       {aviso ? <p className="text-sm font-semibold text-navy">{aviso}</p> : null}
       {tipo.pideContacto ? (
         <>
-          <input required value={contacto} onChange={(e) => setContacto(e.target.value)} placeholder="Nombre de la persona" className="h-11 rounded-2xl border border-line px-3 text-sm" />
-          <input required value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Teléfono" inputMode="tel" className="h-11 rounded-2xl border border-line px-3 text-sm" />
+          <input required={!tipo.paralela} value={contacto} onChange={(e) => setContacto(e.target.value)} placeholder={tipo.paralela ? "Nombre, si ya lo sabes" : "Nombre de la persona"} className="h-11 rounded-2xl border border-line px-3 text-sm" />
+          <input required={!tipo.paralela} value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder={tipo.paralela ? "Número, si ya lo tienes" : "Teléfono"} inputMode="tel" className="h-11 rounded-2xl border border-line px-3 text-sm" />
         </>
       ) : null}
       {tipo.pideContacto || tipo.pideProceso ? (
@@ -814,7 +837,7 @@ function FormaActividad({
       <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Qué quedó, si quieres" className="h-11 rounded-2xl border border-line px-3 text-sm" />
       <div className="flex gap-2">
         <button type="submit" disabled={ocupado} className="h-10 flex-1 rounded-2xl bg-navy text-sm font-semibold text-paper disabled:opacity-60">
-          {abierta ? "Agregar esta persona" : "Empezar"}
+          {abierta ? "Agregar esta persona" : tipo.paralela ? "Empezar, aunque falten datos" : "Empezar"}
         </button>
         <button type="button" onClick={onCerrar} className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold">Cerrar</button>
       </div>
@@ -963,7 +986,19 @@ function Tipificaciones({
   );
 }
 
-function Atenciones({ marcas, gente, propio }: { marcas: MarcaControl[]; gente: PersonaEquipo[]; propio?: boolean }) {
+function Atenciones({
+  marcas,
+  gente,
+  propio,
+  ocupado,
+  onCompletar,
+}: {
+  marcas: MarcaControl[];
+  gente: PersonaEquipo[];
+  propio?: boolean;
+  ocupado: boolean;
+  onCompletar: (input: { id: number; contacto: string; telefono: string; placaLibre: string; nota: string }) => Promise<boolean>;
+}) {
   const filas = porHora(marcas).flatMap((marca) => {
     if (marca.tipo !== "actividad") return [];
     const personas = atencionesDe(marca);
@@ -988,18 +1023,86 @@ function Atenciones({ marcas, gente, propio }: { marcas: MarcaControl[]; gente: 
           <li key={`${marca.id}-${atencion?.id ?? indice}`} className="rounded-xl border border-line bg-card px-3 py-2 text-sm">
             {propio ? null : <span className="font-semibold">{nombre.get(marca.slug) ?? marca.slug} · </span>}
             <span className="font-semibold">{marca.nombreTipo || "Tarea"}</span>
-            {atencion?.contacto ? ` · ${atencion.contacto}` : !atencion && marca.contacto ? ` · ${marca.contacto}` : ""}
-            {atencion?.telefono ? ` · ${atencion.telefono}` : !atencion && marca.telefono ? ` · ${marca.telefono}` : ""}
-            {(atencion ? atencion.placaLibre : marca.placaLibre || marca.placa) ? ` · ${atencion ? atencion.placaLibre : marca.placaLibre || marca.placa}` : ""}
-            {marca.sinProceso ? " · proceso aún no activo" : ""}
-            {" · "}
-            {atencion?.hora || marca.hora}
-            {marca.horaFin ? ` · gestión ${marca.hora}–${marca.horaFin}` : " · gestión sigue"}
-            {(atencion ? atencion.nota : marca.nota) ? ` · ${atencion ? atencion.nota : marca.nota}` : ""}
+            {atencion ? (
+              <CompletarAtencion persona={atencion} ocupado={ocupado} onGuardar={onCompletar} />
+            ) : (
+              <span>
+                {marca.contacto ? ` · ${marca.contacto}` : ""}
+                {marca.telefono ? ` · ${marca.telefono}` : ""}
+                {marca.placaLibre || marca.placa ? ` · ${marca.placaLibre || marca.placa}` : ""}
+                {marca.sinProceso ? " · proceso aún no activo" : ""}
+                {" · "}
+                {marca.hora}
+                {marca.horaFin ? ` · gestión ${marca.hora}–${marca.horaFin}` : " · gestión sigue"}
+                {marca.nota ? ` · ${marca.nota}` : ""}
+              </span>
+            )}
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+function CompletarAtencion({
+  persona,
+  ocupado,
+  onGuardar,
+}: {
+  persona: AtencionControl;
+  ocupado: boolean;
+  onGuardar: (input: { id: number; contacto: string; telefono: string; placaLibre: string; nota: string }) => Promise<boolean>;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [contacto, setContacto] = useState(persona.contacto === "Sin nombre" ? "" : persona.contacto);
+  const [telefono, setTelefono] = useState(persona.telefono);
+  const [placa, setPlaca] = useState(persona.placaLibre);
+  const [nota, setNota] = useState(persona.nota);
+  useEffect(() => {
+    setContacto(persona.contacto === "Sin nombre" ? "" : persona.contacto);
+    setTelefono(persona.telefono);
+    setPlaca(persona.placaLibre);
+    setNota(persona.nota);
+  }, [persona.id, persona.contacto, persona.telefono, persona.placaLibre, persona.nota]);
+  const texto = [persona.hora, persona.contacto, persona.telefono, persona.placaLibre].filter(Boolean).join(" · ");
+  if (!abierto || persona.id <= 0) {
+    return (
+      <span className="flex flex-wrap items-baseline justify-between gap-2">
+        <span>
+          {texto}
+          {persona.nota ? ` · ${persona.nota}` : ""}
+        </span>
+        {persona.id > 0 ? (
+          <button type="button" className="text-xs font-semibold text-navy" onClick={() => setAbierto(true)}>
+            Completar
+          </button>
+        ) : null}
+      </span>
+    );
+  }
+  return (
+    <form
+      className="mt-1 grid gap-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void onGuardar({ id: persona.id, contacto, telefono, placaLibre: placa, nota }).then((ok) => {
+          if (ok) setAbierto(false);
+        });
+      }}
+    >
+      <input value={contacto} onChange={(e) => setContacto(e.target.value)} placeholder="Nombre, si ya lo sabes" className="h-9 rounded-xl border border-line px-2 text-sm" />
+      <input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Número, si ya lo tienes" className="h-9 rounded-xl border border-line px-2 text-sm" />
+      <input value={placa} onChange={(e) => setPlaca(e.target.value.toUpperCase())} placeholder="Placa" className="h-9 rounded-xl border border-line px-2 text-sm uppercase" />
+      <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Qué quedó" className="h-9 rounded-xl border border-line px-2 text-sm" />
+      <div className="flex gap-2">
+        <button type="submit" disabled={ocupado} className="h-8 rounded-xl bg-navy px-3 text-xs font-semibold text-paper disabled:opacity-60">
+          Guardar dato
+        </button>
+        <button type="button" onClick={() => setAbierto(false)} className="h-8 rounded-xl border border-line px-3 text-xs font-semibold">
+          Cerrar
+        </button>
+      </div>
+    </form>
   );
 }
 
