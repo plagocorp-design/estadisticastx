@@ -5,6 +5,18 @@ import { esGerencia, accesoDe, accesoJson, rolDeAcceso, type Acceso } from "@/li
 import { estadoDe } from "@/lib/casos";
 import { mezclarConfig, CAMPOS_CONTRATO, type CampoContrato, type CiudadConfig, type DocConfig, type FlujoConfig, type PasoConfig } from "@/lib/gerencia";
 
+async function exigirFormato(userId: string, ciudadId: number) {
+  const { profileFor } = await import("./team.server");
+  const profile = await profileFor(userId);
+  if (!profile) throw new Error("No encontré tu usuario");
+  if (esGerencia(profile.role)) return { profile, ciudadId: ciudadId || profile.ciudad_vista || 0 };
+  if (profile.role !== "lider" && profile.role !== "coordinadora") throw new Error("Solo el líder o la coordinación configuran el contrato de su ciudad");
+  const mia = profile.ciudad_id ?? 0;
+  if (!mia) throw new Error("Tu usuario no tiene ciudad");
+  if (ciudadId && ciudadId !== mia) throw new Error("Ese contrato es de otra ciudad");
+  return { profile, ciudadId: mia };
+}
+
 async function exigirGerencia(userId: string) {
   const { profileFor } = await import("./team.server");
   const profile = await profileFor(userId);
@@ -271,6 +283,46 @@ export const guardarConfigCiudad = createServerFn({ method: "POST" })
       entidadId: data.ciudadId,
       etiqueta: "Configuración",
       detalle: "Gerencia actualizó documentos, pasos, textos o flujo",
+    });
+    return { ok: true };
+  });
+
+export const guardarCiudadMia = createServerFn({ method: "POST" })
+  .validator((config: CiudadConfig) => config)
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const { profile, ciudadId } = await exigirFormato(context.userId, 0);
+    const config = mezclarConfig(data);
+    const sql = await getSql();
+    await sql.query(
+      `insert into ciudad_config (ciudad_id, documentos, pasos, textos, flujo, contrato_nombre, contrato_nota, contrato_campos)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       on conflict (ciudad_id) do update set
+         documentos = excluded.documentos,
+         pasos = excluded.pasos,
+         textos = excluded.textos,
+         flujo = excluded.flujo,
+         contrato_nombre = excluded.contrato_nombre,
+         contrato_nota = excluded.contrato_nota,
+         contrato_campos = excluded.contrato_campos`,
+      [
+        ciudadId,
+        JSON.stringify(config.documentos),
+        JSON.stringify(config.pasos),
+        JSON.stringify(config.textos),
+        JSON.stringify(config.flujo),
+        config.contratoNombre.slice(0, 160),
+        config.contratoNota.slice(0, 800),
+        JSON.stringify(config.contratoCampos.slice(0, 80)),
+      ],
+    );
+    const { anotar } = await import("./auditoria.server");
+    await anotar(profile, {
+      accion: "edito",
+      entidad: "ciudad",
+      entidadId: ciudadId,
+      etiqueta: "Ciudad",
+      detalle: "Coordinación actualizó los datos, documentos y el contrato de su ciudad",
     });
     return { ok: true };
   });
@@ -593,7 +645,7 @@ export const parteContrato = createServerFn({ method: "POST" })
   .validator((input: { ciudadId: number; cargaId: string; orden: number; datos: string; fin: boolean; nombre: string; campos: CampoContrato[] }) => input)
   .middleware([authMiddleware])
   .handler(async ({ context, data }) => {
-    const profile = await exigirGerencia(context.userId);
+    const { profile, ciudadId } = await exigirFormato(context.userId, data.ciudadId);
     if (data.datos.length > 700_000) throw new Error("Ese trozo pesa demasiado");
     const sql = await getSql();
     await sql.query(
@@ -609,11 +661,11 @@ export const parteContrato = createServerFn({ method: "POST" })
       `insert into ciudad_config (ciudad_id, contrato_nombre, contrato_pdf, contrato_campos)
        values ($1, $2, $3, $4)
        on conflict (ciudad_id) do update set contrato_nombre = excluded.contrato_nombre, contrato_pdf = excluded.contrato_pdf, contrato_campos = excluded.contrato_campos`,
-      [data.ciudadId, data.nombre.slice(0, 160), pdf, JSON.stringify(campos)],
+      [ciudadId, data.nombre.slice(0, 160), pdf, JSON.stringify(campos)],
     );
     await sql.query(`delete from carga_trozos where carga_id = $1`, [data.cargaId]);
     const { anotar } = await import("./auditoria.server");
-    await anotar(profile, { accion: "subio", entidad: "ciudad", entidadId: data.ciudadId, etiqueta: data.nombre, detalle: "Gerencia subió el formato de contrato de la ciudad" });
+    await anotar(profile, { accion: "subio", entidad: "ciudad", entidadId: ciudadId, etiqueta: data.nombre, detalle: "Subió el contrato de su ciudad" });
     return { ok: true };
   });
 
@@ -645,6 +697,50 @@ export const pdfDeCiudad = createServerFn({ method: "GET" })
     if (rows[0]?.contrato_pdf) return { pdf: rows[0].contrato_pdf, oficial: false };
     const { PLANTILLA } = await import("./contrato-plantilla");
     return { pdf: PLANTILLA, oficial: true };
+  });
+
+export const pdfMio = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { ciudadId } = await exigirFormato(context.userId, 0);
+    const sql = await getSql();
+    const rows = await sql.query<{ contrato_pdf: string; contrato_nombre: string }>(
+      `select contrato_pdf, contrato_nombre from ciudad_config where ciudad_id = $1`,
+      [ciudadId],
+    );
+    if (rows[0]?.contrato_pdf) return { pdf: rows[0].contrato_pdf, oficial: false, ciudadId, nombre: rows[0].contrato_nombre };
+    const { PLANTILLA } = await import("./contrato-plantilla");
+    return { pdf: PLANTILLA, oficial: true, ciudadId, nombre: "" };
+  });
+
+export const guardarFormatoMio = createServerFn({ method: "POST" })
+  .validator((input: { asunto: string; cuerpo: string; campos: CampoContrato[] }) => input)
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const { profile, ciudadId } = await exigirFormato(context.userId, 0);
+    const actual = await configDe(ciudadId);
+    const textos = {
+      ...actual.textos,
+      correo_firma_asunto: data.asunto.slice(0, 140),
+      correo_firma_cuerpo: data.cuerpo.slice(0, 4000),
+    };
+    const campos = (data.campos.length ? data.campos : actual.contratoCampos).slice(0, 80);
+    const sql = await getSql();
+    await sql.query(
+      `insert into ciudad_config (ciudad_id, textos, contrato_campos)
+       values ($1, $2, $3)
+       on conflict (ciudad_id) do update set textos = excluded.textos, contrato_campos = excluded.contrato_campos`,
+      [ciudadId, JSON.stringify(textos), JSON.stringify(campos)],
+    );
+    const { anotar } = await import("./auditoria.server");
+    await anotar(profile, {
+      accion: "edito",
+      entidad: "ciudad",
+      entidadId: ciudadId,
+      etiqueta: "Contrato",
+      detalle: "Actualizó el contrato y el correo de firma de su ciudad",
+    });
+    return { ok: true };
   });
 
 export async function plantillaDeCaso(casoId: number) {

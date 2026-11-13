@@ -289,7 +289,7 @@ export async function certificadoDe(casoId: number, actor: Actor) {
   });
   pdf.titulo("Nota");
   pdf.parrafo(
-    "Este certificado es el registro interno de Vincula Libre. No es una firma digital certificada ni un sobre de DocuSeal. Sirve para ver quién cambió qué, a qué hora, y para comprobar que la cadena no fue alterada.",
+    "Este certificado es el registro interno de Vincula Libre. No es la firma del contrato. Sirve para ver quién cambió qué, a qué hora, y para comprobar que la cadena no fue alterada.",
     10,
   );
 

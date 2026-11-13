@@ -12,11 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PilotoRouteImport } from './routes/piloto'
-import { Route as ApiDocusealRouteImport } from './routes/api/docuseal'
 import { Route as ApiSheetsRouteImport } from './routes/api/sheets'
 import { Route as ApiWaRouteImport } from './routes/api/wa'
 import { Route as FirmarTokenRouteImport } from './routes/firmar.$token'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiConstanciaTokenRouteImport } from './routes/api/constancia.$token'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -31,11 +31,6 @@ const LoginRoute = LoginRouteImport.update({
 const PilotoRoute = PilotoRouteImport.update({
   id: '/piloto',
   path: '/piloto',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiDocusealRoute = ApiDocusealRouteImport.update({
-  id: '/api/docuseal',
-  path: '/api/docuseal',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSheetsRoute = ApiSheetsRouteImport.update({
@@ -58,37 +53,42 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiConstanciaTokenRoute = ApiConstanciaTokenRouteImport.update({
+  id: '/api/constancia/$token',
+  path: '/api/constancia/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/piloto': typeof PilotoRoute
-  '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/constancia/$token': typeof ApiConstanciaTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/piloto': typeof PilotoRoute
-  '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/constancia/$token': typeof ApiConstanciaTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/piloto': typeof PilotoRoute
-  '/api/docuseal': typeof ApiDocusealRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/constancia/$token': typeof ApiConstanciaTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -96,42 +96,42 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/piloto'
-    | '/api/docuseal'
     | '/api/sheets'
     | '/api/wa'
     | '/firmar/$token'
     | '/api/auth/$'
+    | '/api/constancia/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/login'
     | '/piloto'
-    | '/api/docuseal'
     | '/api/sheets'
     | '/api/wa'
     | '/firmar/$token'
     | '/api/auth/$'
+    | '/api/constancia/$token'
   id:
     | '__root__'
     | '/'
     | '/login'
     | '/piloto'
-    | '/api/docuseal'
     | '/api/sheets'
     | '/api/wa'
     | '/firmar/$token'
     | '/api/auth/$'
+    | '/api/constancia/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   PilotoRoute: typeof PilotoRoute
-  ApiDocusealRoute: typeof ApiDocusealRoute
   ApiSheetsRoute: typeof ApiSheetsRoute
   ApiWaRoute: typeof ApiWaRoute
   FirmarTokenRoute: typeof FirmarTokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiConstanciaTokenRoute: typeof ApiConstanciaTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -155,13 +155,6 @@ declare module '@tanstack/react-router' {
       path: '/piloto'
       fullPath: '/piloto'
       preLoaderRoute: typeof PilotoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/docuseal': {
-      id: '/api/docuseal'
-      path: '/api/docuseal'
-      fullPath: '/api/docuseal'
-      preLoaderRoute: typeof ApiDocusealRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sheets': {
@@ -192,6 +185,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/constancia/$token': {
+      id: '/api/constancia/$token'
+      path: '/api/constancia/$token'
+      fullPath: '/api/constancia/$token'
+      preLoaderRoute: typeof ApiConstanciaTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -199,11 +199,11 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   PilotoRoute: PilotoRoute,
-  ApiDocusealRoute: ApiDocusealRoute,
   ApiSheetsRoute: ApiSheetsRoute,
   ApiWaRoute: ApiWaRoute,
   FirmarTokenRoute: FirmarTokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiConstanciaTokenRoute: ApiConstanciaTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

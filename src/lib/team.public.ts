@@ -66,6 +66,7 @@ export const SECCIONES_APP = [
   { id: "llamadas", label: "Llamar" },
   { id: "equipo", label: "Equipo" },
   { id: "auditoria", label: "Registro" },
+  { id: "formato", label: "Ciudad" },
 ] as const;
 
 export const PODERES_APP = [
@@ -101,16 +102,16 @@ export function accesoDe(role: string, raw?: string | null): Acceso {
       const secciones = Array.isArray(parsed.secciones) ? parsed.secciones.filter((id) => IDS_SECCION.has(id)) : [];
       const poderes = Array.isArray(parsed.poderes) ? parsed.poderes.filter((id) => IDS_PODER.has(id)) : [];
       const area = AREAS_APP.some((item) => item.id === parsed.area) ? String(parsed.area) : "";
-      if (secciones.length > 0) return { secciones, poderes, area };
+      if (secciones.length > 0) return conFormato(role, { secciones, poderes, area });
     } catch {
       /* el texto viejo no cuenta */
     }
   }
   if (role === "gerencia" || role === "lider") {
-    return { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["propios", "ver_equipo", "configurar"], area: "" };
+    return conFormato(role, { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["propios", "ver_equipo", "configurar"], area: "" });
   }
   if (role === "coordinadora") {
-    return { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["ver_equipo"], area: "" };
+    return conFormato(role, { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["ver_equipo"], area: "" });
   }
   if (role === "via_seguros" || role === "operativa" || role === "servicio") {
     return { secciones: ["procesos"], poderes: [], area: role };
@@ -123,6 +124,13 @@ export function rolDeAcceso(acceso: Acceso): Role {
   if (acceso.poderes.includes("configurar")) return "lider";
   if (acceso.poderes.includes("ver_equipo")) return "coordinadora";
   return "asesor";
+}
+
+function conFormato(role: string, acceso: Acceso): Acceso {
+  if ((role === "lider" || role === "coordinadora") && !acceso.secciones.includes("formato")) {
+    return { ...acceso, secciones: [...acceso.secciones, "formato"] };
+  }
+  return acceso;
 }
 
 export function accesoJson(acceso: Acceso) {

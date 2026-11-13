@@ -46,6 +46,14 @@ export const consultarTarjeta = createServerFn({ method: "POST" })
         body: JSON.stringify({ placa }),
       });
       crudo = (await respuesta.text()).trim();
+      if (!crudo) {
+        return {
+          ok: false,
+          estado: "Sin respuesta",
+          detalle: "La intranet de Taxis Libres respondió vacía. Su página to.php no está entregando el estado. No es un fallo de la placa.",
+          bloqueo: "",
+        };
+      }
     } catch {
       return { ok: false, estado: "Sin respuesta", detalle: "No pude consultar la intranet de Taxis Libres.", bloqueo: "" };
     }

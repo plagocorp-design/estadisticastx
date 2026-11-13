@@ -104,13 +104,28 @@ export function isMainModule(moduleUrl) {
   }
 }
 
+function leerEnvLocal(root) {
+  try {
+    const crudo = readFileSync(join(root, ".env"), "utf8");
+    const env = {};
+    for (const linea of crudo.split("\n")) {
+      const corte = linea.indexOf("=");
+      if (corte < 1 || linea.startsWith("#")) continue;
+      env[linea.slice(0, corte)] = linea.slice(corte + 1).replace(/^"|"$/g, "").replace(/\\n/g, "\n");
+    }
+    return env;
+  } catch {
+    return {};
+  }
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
     console.error("usage: node scripts/with-app-env.mjs <command> [args…]");
     process.exit(2);
   }
-  const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
+  const env = mergeAppEnv(readAppEnv(projectRoot()), { ...leerEnvLocal(projectRoot()), ...process.env });
   const child = spawn(command, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {

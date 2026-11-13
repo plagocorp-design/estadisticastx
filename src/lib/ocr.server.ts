@@ -1,4 +1,4 @@
-import { analizarTexto, type LecturaDoc } from "@/lib/ocr";
+import { analizarTexto, asignarLados, type LecturaDoc } from "@/lib/ocr";
 
 function bytesDe(base64: string) {
   const limpio = base64.replace(/^data:[^;]+;base64,/i, "").replace(/\s/g, "");
@@ -73,4 +73,29 @@ export async function leerArchivo(nombre: string, archivo: string, tipo: string,
     texto = "";
   }
   return analizarTexto(tipo, texto, actual);
+}
+
+export async function leerVarias(
+  paginas: { nombre: string; archivo: string }[],
+  preferido: string,
+  actual: Record<string, string>,
+) {
+  const textos: string[] = [];
+  for (const pagina of paginas.slice(0, 8)) {
+    const data = bytesDe(pagina.archivo);
+    let texto = "";
+    try {
+      const esPdf = pagina.nombre.toLowerCase().endsWith(".pdf") || data.subarray(0, 5).toString() === "%PDF-";
+      texto = esPdf ? await textoPdf(data) : await textoFoto(data);
+    } catch {
+      texto = "";
+    }
+    textos.push(texto);
+  }
+  const lados = asignarLados(textos, preferido);
+  return paginas.slice(0, 8).map((pagina, indice) => {
+    const tipo = lados[indice] || "";
+    const lectura = analizarTexto(tipo || preferido || "foto", textos[indice], actual);
+    return { indice, tipo, nombre: pagina.nombre, lectura };
+  });
 }

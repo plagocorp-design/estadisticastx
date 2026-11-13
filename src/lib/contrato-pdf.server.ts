@@ -91,10 +91,13 @@ export async function montarContrato(
     mes: fecha.mes,
     ano: fecha.ano,
     capacidad: datos.capacidad ? `${datos.capacidad} PASAJEROS` : "",
+    empresa: datos.empresa || "",
+    ...(datos.extras ?? {}),
   };
 
   if (plantilla?.campos.length) {
     for (const campo of plantilla.campos) {
+      if (campo.enContrato === false) continue;
       if (campo.campo === "firma") continue;
       texto(paginas[campo.pagina], valores[campo.campo] ?? "", campo.x, campo.y, campo.size, campo.fuente);
     }

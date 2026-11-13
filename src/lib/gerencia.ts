@@ -30,6 +30,9 @@ export type CampoContrato = {
   y: number;
   size: number;
   fuente?: string;
+  label?: string;
+  pide?: string;
+  enContrato?: boolean;
 };
 
 export type CiudadConfig = {
@@ -46,7 +49,8 @@ export const TEXTOS_BASE: { clave: string; label: string; valor: string }[] = [
   { clave: "bitacora_aviso", label: "Aviso de bitácora", valor: "Son más de las 4:30. Falta tu bitácora de hoy." },
   { clave: "enviar_operativa", label: "Botón de operativa", valor: "Enviar a operativa" },
   { clave: "whatsapp_pago", label: "WhatsApp del enlace de pago", valor: "Hola. Le comparto el enlace para el pago de la póliza." },
-  { clave: "siguiente_vacio", label: "Cuando no hay siguiente paso", valor: "Nada pendiente en el proceso." },
+  { clave: "correo_firma_asunto", label: "Asunto del correo de firma", valor: "Contrato para firmar · {placa}" },
+  { clave: "correo_firma_cuerpo", label: "Cuerpo del correo de firma", valor: "Hola {nombre},\n\nYa casi eres parte de Taxis Libres. Revisa y firma el contrato del vehículo {placa} con el botón de este correo.\n\nSi algo no cuadra, responde a este correo o habla con tu asesor.\n\nEquipo de vinculaciones\nTaxis Libres" },
 ];
 
 const NO_PIDEN = new Set(["soat", "tecnomecanica", "formulario"]);
@@ -57,27 +61,35 @@ export function parteDeDoc(id: string) {
   return "Documentos";
 }
 
-export const DATOS_CONTRATO: { campo: string; label: string; viene: string }[] = [
-  { campo: "nombre", label: "Nombre", viene: "Cédula, frente" },
-  { campo: "cc", label: "Cédula", viene: "Cédula, frente" },
-  { campo: "direccion", label: "Dirección", viene: "Formulario inicial" },
-  { campo: "telefono", label: "Teléfono", viene: "Formulario inicial" },
-  { campo: "correo", label: "Correo", viene: "Formulario inicial" },
-  { campo: "placa", label: "Placa", viene: "Tarjeta de propiedad" },
-  { campo: "marca", label: "Marca", viene: "Tarjeta de propiedad" },
-  { campo: "linea", label: "Línea", viene: "Tarjeta de propiedad" },
-  { campo: "clase", label: "Clase", viene: "Tarjeta de propiedad" },
-  { campo: "modelo", label: "Modelo", viene: "Tarjeta de propiedad" },
-  { campo: "motor", label: "Número de motor", viene: "Tarjeta de propiedad" },
-  { campo: "serie", label: "Número de serie", viene: "Tarjeta de propiedad" },
-  { campo: "carroceria", label: "Carrocería", viene: "Tarjeta de propiedad" },
-  { campo: "cilindraje", label: "Cilindraje", viene: "Tarjeta de propiedad" },
-  { campo: "servicio", label: "Tipo de servicio", viene: "Tarjeta de operación" },
-  { campo: "capacidad", label: "Pasajeros", viene: "Tarjeta de propiedad" },
-  { campo: "dia", label: "Día de la firma", viene: "Fecha de firma" },
-  { campo: "mes", label: "Mes de la firma", viene: "Fecha de firma" },
-  { campo: "ano", label: "Año de la firma", viene: "Fecha de firma" },
-  { campo: "firma", label: "Firma del vinculado", viene: "Firma" },
+export const DATOS_CONTRATO: { campo: string; label: string; viene: string; pide: string }[] = [
+  { campo: "nombre", label: "Nombre", viene: "Seguimiento", pide: "Inicio" },
+  { campo: "cc", label: "Cédula", viene: "Cédula, frente", pide: "Inicio" },
+  { campo: "telefono", label: "Teléfono", viene: "Seguimiento", pide: "Inicio" },
+  { campo: "empresa", label: "Empresa actual", viene: "Seguimiento", pide: "Inicio" },
+  { campo: "origen", label: "Origen", viene: "Seguimiento", pide: "Inicio" },
+  { campo: "placa", label: "Placa", viene: "Tarjeta de propiedad", pide: "Inicio" },
+  { campo: "direccion", label: "Dirección", viene: "Seguimiento", pide: "Firma" },
+  { campo: "correo", label: "Correo", viene: "Seguimiento", pide: "Firma" },
+  { campo: "marca", label: "Marca", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "linea", label: "Línea", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "clase", label: "Clase", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "modelo", label: "Modelo", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "motor", label: "Número de motor", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "serie", label: "Número de serie", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "carroceria", label: "Carrocería", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "cilindraje", label: "Cilindraje", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "servicio", label: "Tipo de servicio", viene: "Tarjeta de operación", pide: "Firma" },
+  { campo: "capacidad", label: "Pasajeros", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "tipo_documento", label: "Tipo de documento", viene: "Cédula", pide: "Inicio" },
+  { campo: "chasis", label: "Chasis", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "combustible", label: "Combustible", viene: "Tarjeta de propiedad", pide: "Firma" },
+  { campo: "copropietario", label: "Copropietario", viene: "Seguimiento", pide: "Inicio" },
+  { campo: "cc2", label: "Cédula del copropietario", viene: "Seguimiento", pide: "Inicio" },
+  { campo: "nitAnterior", label: "NIT de la empresa anterior", viene: "Firma", pide: "Firma" },
+  { campo: "dia", label: "Día de la firma", viene: "Fecha de firma", pide: "Firma" },
+  { campo: "mes", label: "Mes de la firma", viene: "Fecha de firma", pide: "Firma" },
+  { campo: "ano", label: "Año de la firma", viene: "Fecha de firma", pide: "Firma" },
+  { campo: "firma", label: "Firma del vinculado", viene: "Firma", pide: "Firma" },
 ];
 
 export const CAMPOS_CONTRATO: CampoContrato[] = [

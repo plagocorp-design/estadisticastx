@@ -8,16 +8,18 @@ import { AgendaView } from "@/components/agenda";
 import { ChatCaso } from "@/components/chat-caso";
 import { EditorHojas } from "@/components/editor-hojas";
 import { BitacoraVista } from "@/components/bitacora";
+import { AuditoriaVista } from "@/components/auditoria";
 import { ControlVista } from "@/components/control";
 import { CallCenterVista } from "@/components/callcenter";
 import { EquipoVista, MiClave } from "@/components/equipo";
-import { AuditoriaVista } from "@/components/auditoria";
+import { FormatoCiudad } from "@/components/formato-ciudad";
 import { cuando } from "@/lib/auditoria";
 import { certificadoProceso } from "@/lib/certificado.functions";
 import { EnviarFirma } from "@/components/enviar-firma";
 import { sincronizarDocuseal, verAuditoriaFirma } from "@/lib/firma.functions";
-import { leerDocumento, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
-import { enviarEnTrozos, prepararArchivo, prepararParaLeer } from "@/lib/archivo";
+import { leerPaginas, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
+import { paginasDe } from "@/lib/paginas";
+import { enviarEnTrozos } from "@/lib/archivo";
 import type { CampoLeido } from "@/lib/ocr";
 import { listEquipo } from "@/lib/control.functions";
 import type { PersonaEquipo } from "@/lib/control";
@@ -27,6 +29,7 @@ import { bitacoraHecha, horaBogota, type Bitacora } from "@/lib/bitacora";
 import { SheetsPanel, DOCUMENTO } from "@/components/sheets-panel";
 import { traerSheetsFn } from "@/lib/sheets.functions";
 import { marcarChatsLeidos, resumenChat, type ChatResumen } from "@/lib/chat.functions";
+import { exportarSql } from "@/lib/respaldo.functions";
 import {
   createCaso,
   exportarExcel,
@@ -66,11 +69,13 @@ import { ASESORES, accesoDe, configura, esBandeja, esGerencia, etiquetaRol, llev
 import { BloquePiloto } from "@/components/piloto";
 import { GerenciaVista } from "@/components/gerencia";
 import { configMia, entrarCiudad, leerPasosExtra, marcarPasoExtra, salirCiudad } from "@/lib/gerencia.functions";
+import { DATOS_CONTRATO } from "@/lib/gerencia";
 import { CartaDevolucion } from "@/components/carta-devolucion";
 import { AvisoTarjeta, avisoSugerido } from "@/components/aviso-tarjeta";
 import { estadoPiloto, pasarMano } from "@/lib/piloto.functions";
 import { etiquetaMarca, marcasDe } from "@/lib/piloto";
 import { buscarEmpresas, unificarEmpresa } from "@/lib/empresas";
+import { consultarTarjeta, type EstadoTarjetaOficial } from "@/lib/tarjeta.functions";
 
 const GRUPOS = ["Inicio", "Documentos", "Firma", "Póliza", "Tarjeta"] as const;
 const TARJETAS = ["Pendiente", "Radicada", "Expedida"] as const;
@@ -158,7 +163,7 @@ export function Board() {
   const [exportando, setExportando] = useState(false);
   const [archivos, setArchivos] = useState(false);
   const [mas, setMas] = useState(false);
-  const [vista, setVista] = useState<"procesos" | "agenda" | "meta" | "bitacora" | "control" | "llamadas" | "equipo" | "auditoria">("procesos");
+  const [vista, setVista] = useState<"procesos" | "agenda" | "meta" | "bitacora" | "control" | "llamadas" | "equipo" | "auditoria" | "formato">("procesos");
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [chats, setChats] = useState<Record<number, ChatResumen>>({});
   const [soloMensajes, setSoloMensajes] = useState(false);
@@ -343,9 +348,10 @@ export function Board() {
       const bin = atob(file.base64);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const blob = new Blob([bytes], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
+      const type = file.filename.endsWith(".sql")
+        ? "application/sql"
+        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      const blob = new Blob([bytes], { type });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -367,6 +373,10 @@ export function Board() {
 
   function bajarTodo() {
     return bajarArchivo(exportarTodo);
+  }
+
+  function bajarSql() {
+    return bajarArchivo(exportarSql);
   }
 
   async function cargarTodo(file: File) {
@@ -435,6 +445,8 @@ export function Board() {
               ? "Equipo"
               : vista === "auditoria"
                 ? "Registro"
+                : vista === "formato"
+                  ? "Contrato de la ciudad"
                 : miraEquipo
                   ? "Procesos del equipo"
                   : bandeja
@@ -465,6 +477,7 @@ export function Board() {
         { id: "llamadas" as const, label: "Llamar", icon: Phone, n: 0, alerta: false },
         { id: "equipo" as const, label: "Equipo", icon: Users, n: 0, alerta: false },
         { id: "auditoria" as const, label: "Registro", icon: ScrollText, n: 0, alerta: false },
+        { id: "formato" as const, label: "Ciudad", icon: FileText, n: 0, alerta: false },
       ].filter((item) => accesoMio.secciones.includes(item.id));
 
   return (
@@ -548,6 +561,16 @@ export function Board() {
               {exportando ? "Armando…" : "Bajar respaldo"}
             </button>
             {soyDavid ? (
+              <>
+              <button
+                type="button"
+                onClick={() => void bajarSql()}
+                disabled={exportando}
+                className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper disabled:opacity-60"
+              >
+                <Download className="size-4" />
+                {exportando ? "Armando…" : "Base completa"}
+              </button>
               <label className="flex h-11 cursor-pointer items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper">
                 <Upload className="size-4" />
                 {exportando ? "Cargando…" : "Cargar respaldo"}
@@ -562,6 +585,7 @@ export function Board() {
                   }}
                 />
               </label>
+              </>
             ) : null}
             </>
           ) : null}
@@ -709,6 +733,16 @@ export function Board() {
                 {exportando ? "Armando…" : "Bajar respaldo"}
               </button>
               {soyDavid ? (
+                <>
+                <button
+                  type="button"
+                  onClick={() => void bajarSql()}
+                  disabled={exportando}
+                  className="inline-flex h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm disabled:opacity-60"
+                >
+                  <Download className="size-4" />
+                  {exportando ? "Armando…" : "Base completa"}
+                </button>
                 <label className="inline-flex h-10 cursor-pointer items-center gap-1 rounded-xl border border-line px-3 text-sm">
                   <Upload className="size-4" />
                   {exportando ? "Cargando…" : "Cargar respaldo"}
@@ -723,6 +757,7 @@ export function Board() {
                     }}
                   />
                 </label>
+                </>
               ) : null}
               </>
             ) : null}
@@ -775,6 +810,8 @@ export function Board() {
           <EquipoVista edita={soyDavid} />
         ) : vista === "auditoria" ? (
           <AuditoriaVista veClaves={soyDavid} />
+        ) : vista === "formato" ? (
+          <FormatoCiudad />
         ) : vista === "control" ? (
           <ControlVista me={me} hora={hora} hoy={hoy} verEquipo={miraEquipo} casos={casos} />
         ) : vista === "llamadas" ? (
@@ -1533,6 +1570,8 @@ function Panel({
   const vivo = form ? conAvance(form) : null;
   const [pasosCfg, setPasosCfg] = useState<Record<string, { label: string; activo: boolean }>>({});
   const [docsCfg, setDocsCfg] = useState<{ id: string; label: string; activo: boolean; parte?: string }[]>([]);
+  const [camposCfg, setCamposCfg] = useState<{ campo: string; label: string; pide: string }[]>([]);
+  const [faltanFirma, setFaltanFirma] = useState<string[]>([]);
   const [extras, setExtras] = useState<{ key: string; label: string; grupo: string }[]>([]);
   const [configLista, setConfigLista] = useState(false);
   const [marcasExtra, setMarcasExtra] = useState<Record<string, boolean>>({});
@@ -1543,6 +1582,18 @@ function Panel({
         for (const paso of conf.pasos) mapa[paso.key] = { label: paso.label, activo: paso.activo };
         setPasosCfg(mapa);
         setDocsCfg(conf.documentos.map((doc) => ({ id: doc.id, label: doc.label, activo: doc.activo, parte: doc.parte })));
+        const guardados = new Map(conf.contratoCampos.map((campo) => [campo.campo, campo]));
+        const base = DATOS_CONTRATO.map((dato) => {
+          const guardado = guardados.get(dato.campo);
+          return { campo: dato.campo, label: guardado?.label || dato.label, pide: guardado?.pide || dato.pide };
+        });
+        const vistos = new Set(base.map((dato) => dato.campo));
+        for (const campo of conf.contratoCampos) {
+          if (!campo.campo.startsWith("extra_") || vistos.has(campo.campo)) continue;
+          vistos.add(campo.campo);
+          base.push({ campo: campo.campo, label: campo.label || campo.campo, pide: campo.pide || "Seguimiento" });
+        }
+        setCamposCfg(base);
         setExtras(
           conf.pasos
             .filter((paso) => paso.activo && !STEPS.some((item) => item.key === paso.key) && !["Operativa", "Vía Seguros", "Servicio"].includes(grupoAsesor(paso.grupo)))
@@ -1648,6 +1699,7 @@ function Panel({
       citaHora: actual.citaHora,
       entrega: actual.entrega,
       copropietarios: actual.copropietarios,
+      datosExtra: actual.datosExtra,
       ownerSlug: ownerRef.current,
       pdf: pdf.pdf ? `${pdf.nombre}:${pdf.pdf.length}:${pdf.pdf.slice(0, 24)}` : "",
     });
@@ -1712,6 +1764,7 @@ function Panel({
       citaHora: actual.citaHora,
       entrega: actual.entrega,
       copropietarios: actual.copropietarios,
+      datosExtra: actual.datosExtra,
       ...(pdf.pdf ? { contratoPdf: pdf.pdf, contratoNombre: pdf.nombre } : {}),
       ...(delEquipo ? { ownerSlug: ownerRef.current } : {}),
     };
@@ -1798,26 +1851,23 @@ function Panel({
     }
   }
 
-  async function leerApertura(tipo: FotoApertura["tipo"], file: File) {
-    if (!file.type.startsWith("image/")) {
-      setAviso("Sube una foto, no un PDF. Si el documento es un escaneo, tómale una foto.");
+  async function leerApertura(preferido: FotoApertura["tipo"] | "", files: File[]) {
+    if (!files.length) return;
+    if (files.some((file) => file.size > 30 * 1024 * 1024)) {
+      setAviso("Un archivo pesa más de 30 MB");
       return;
     }
-    if (file.size > 30 * 1024 * 1024) {
-      setAviso("La foto pesa más de 30 MB");
-      return;
-    }
-    setLeyendoFoto(tipo);
+    setLeyendoFoto(preferido || "lote");
     setAviso("");
     try {
-      const listo = await prepararArchivo(file);
-      let paraLeer = listo;
-      try {
-        paraLeer = await prepararParaLeer(file);
-      } catch {
-        paraLeer = listo;
+      const paginas: { nombre: string; archivo: string }[] = [];
+      let sobraron = 0;
+      for (const file of files) {
+        const parte = await paginasDe(file);
+        paginas.push(...parte.paginas);
+        sobraron += parte.sobraron;
       }
-      const archivo = listo.archivo;
+      const usadas = paginas.slice(0, 8);
       const actual = {
         placa: draft.placa,
         cc: draft.cc,
@@ -1837,28 +1887,47 @@ function Panel({
         servicio: draft.servicio ?? "",
         empresa: draft.empresa,
       };
-      const leida = await leerDocumento({ data: { tipo, nombre: paraLeer.nombre, archivo: paraLeer.archivo, actual } });
+      const leidas = await leerPaginas({ data: { paginas: usadas, preferido, actual } });
       const llenos: Partial<CasoDraft> = {};
       const distintos: CampoLeido[] = [];
-      for (const campo of leida.campos) {
-        const valor = String(actual[campo.key] ?? "").trim();
-        if (!valor) llenos[campo.key] = campo.leido;
-        else distintos.push(campo);
+      const fotos = [...fotosApertura];
+      const puestos: string[] = [];
+      let sueltas = 0;
+      for (const pagina of leidas.paginas) {
+        const origen = usadas[pagina.indice];
+        if (!origen || !pagina.tipo) {
+          sueltas += 1;
+          continue;
+        }
+        const tipo = pagina.tipo as FotoApertura["tipo"];
+        const item = { tipo, nombre: origen.nombre, archivo: origen.archivo, lectura: JSON.stringify(pagina.lectura) };
+        const puesto = fotos.findIndex((foto) => foto.tipo === tipo);
+        if (puesto >= 0) fotos[puesto] = item;
+        else fotos.push(item);
+        puestos.push(NOMBRE_LADO[tipo]);
+        for (const campo of pagina.lectura.campos) {
+          const valor = String((llenos[campo.key] ?? actual[campo.key]) || "").trim();
+          if (!valor) llenos[campo.key] = campo.leido;
+          else if (valor !== campo.leido) distintos.push(campo);
+        }
       }
       if (Object.keys(llenos).length) setDraft((prev) => ({ ...prev, ...llenos }));
-      setChoques((prev) => [...prev.filter((item) => !leida.campos.some((campo) => campo.key === item.key)), ...distintos]);
-      setFotosApertura((prev) => [
-        ...prev.filter((item) => item.tipo !== tipo),
-        { tipo, nombre: listo.nombre, archivo, lectura: JSON.stringify(leida) },
-      ]);
-      const etiquetas = Object.keys(llenos).map((key) => leida.campos.find((campo) => campo.key === key)?.label ?? key);
+      setChoques((prev) => [...prev.filter((item) => !distintos.some((campo) => campo.key === item.key)), ...distintos]);
+      setFotosApertura(fotos);
+      const etiquetas = Object.keys(llenos).map((key) => distintos.concat(leidas.paginas.flatMap((pagina) => pagina.lectura.campos)).find((campo) => campo.key === key)?.label ?? key);
+      const donde = puestos.length ? `Ubiqué ${puestos.join(", ")}.` : "No ubiqué de qué documento se trata.";
       setAviso(
-        etiquetas.length
-          ? `Llené ${etiquetas.join(", ")}. Revisa que estén bien y escribe el celular.`
-          : leida.aviso,
+        [
+          donde,
+          etiquetas.length ? `Llené ${etiquetas.join(", ")}. Revisa y escribe el celular.` : "",
+          sueltas ? `${sueltas} página${sueltas === 1 ? "" : "s"} no la ubiqué. Súbela en su casilla.` : "",
+          sobraron ? `Dejé por fuera ${sobraron} páginas. El máximo es 8.` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
       );
     } catch (err) {
-      setAviso(err instanceof Error ? err.message : "No pude leer la foto. Escríbelo a mano.");
+      setAviso(err instanceof Error ? err.message : "No pude leer el documento. Escríbelo a mano.");
     } finally {
       setLeyendoFoto("");
     }
@@ -2075,7 +2144,7 @@ function Panel({
                 {caso?.actualizadoEn ? ` · Actualizado ${cuando(caso.actualizadoEn)}${caso.actualizadoPor ? ` por ${caso.actualizadoPor}` : ""}` : ""}
               </p>
             ) : (
-              <p className="text-sm text-ink-soft">Toma o sube la foto de la cédula y de la tarjeta de propiedad. Con eso se llenan placa, cédula y nombre. El celular lo escribes tú.</p>
+              <p className="text-sm text-ink-soft">Toma o sube la foto de la cédula y de la tarjeta de propiedad. También sirve un PDF de varias páginas: separa el frente y el reverso. El celular lo escribes tú.</p>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -2101,12 +2170,27 @@ function Panel({
             <form id="nuevo" onSubmit={create} className="grid gap-3">
               <div className="grid gap-2 rounded-2xl border border-line bg-paper p-3">
                 <p className="text-sm font-semibold">Abre el seguimiento con las fotos</p>
-                <p className="text-sm text-ink-soft">Cédula por las dos caras, tarjeta de propiedad por las dos caras y tarjeta de operación. Esas fotos quedan guardadas en los documentos. El celular no sale en la foto: escríbelo tú.</p>
-                <FotoApertura etiqueta="Cédula, frente" src={srcFoto("cedula_frente")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_frente")} leyendo={leyendoFoto === "cedula_frente"} onFile={(file) => void leerApertura("cedula_frente", file)} />
-                <FotoApertura etiqueta="Cédula, reverso" src={srcFoto("cedula_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_reverso")} leyendo={leyendoFoto === "cedula_reverso"} onFile={(file) => void leerApertura("cedula_reverso", file)} />
-                <FotoApertura etiqueta="Tarjeta de propiedad, frente" src={srcFoto("tarjeta_propiedad_frente")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_frente")} leyendo={leyendoFoto === "tarjeta_propiedad_frente"} onFile={(file) => void leerApertura("tarjeta_propiedad_frente", file)} />
-                <FotoApertura etiqueta="Tarjeta de propiedad, reverso" src={srcFoto("tarjeta_propiedad_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_reverso")} leyendo={leyendoFoto === "tarjeta_propiedad_reverso"} onFile={(file) => void leerApertura("tarjeta_propiedad_reverso", file)} />
-                <FotoApertura etiqueta="Tarjeta de operación" src={srcFoto("tarjeta_operacion")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion"} onFile={(file) => void leerApertura("tarjeta_operacion", file)} />
+                <p className="text-sm text-ink-soft">Cédula por las dos caras, tarjeta de propiedad por las dos caras y tarjeta de operación. Puedes subir las fotos o un PDF con varias páginas: el programa las separa. El celular no sale en el documento: escríbelo tú.</p>
+                <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">
+                  {leyendoFoto === "lote" ? "Leyendo…" : "Subir PDF o varias fotos"}
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf,.pdf"
+                    multiple
+                    disabled={Boolean(leyendoFoto)}
+                    className="sr-only"
+                    onChange={(e) => {
+                      const files = e.target.files ? Array.from(e.target.files) : [];
+                      e.target.value = "";
+                      if (files.length) void leerApertura("", files);
+                    }}
+                  />
+                </label>
+                <FotoApertura etiqueta="Cédula, frente" src={srcFoto("cedula_frente")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_frente")} leyendo={leyendoFoto === "cedula_frente" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("cedula_frente", [file])} />
+                <FotoApertura etiqueta="Cédula, reverso" src={srcFoto("cedula_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_reverso")} leyendo={leyendoFoto === "cedula_reverso" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("cedula_reverso", [file])} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, frente" src={srcFoto("tarjeta_propiedad_frente")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_frente")} leyendo={leyendoFoto === "tarjeta_propiedad_frente" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("tarjeta_propiedad_frente", [file])} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, reverso" src={srcFoto("tarjeta_propiedad_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_reverso")} leyendo={leyendoFoto === "tarjeta_propiedad_reverso" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("tarjeta_propiedad_reverso", [file])} />
+                <FotoApertura etiqueta="Tarjeta de operación" src={srcFoto("tarjeta_operacion")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("tarjeta_operacion", [file])} />
                 <button type="button" disabled={fotosApertura.length === 0} onClick={() => setEditorFotos(true)} className="h-11 rounded-2xl border border-line bg-card px-3 text-sm font-semibold disabled:opacity-50">
                   {hojasArmadas.length ? `Hojas armadas: ${hojasArmadas.length}. Acomodar otra vez` : "Acomodar estas fotos en hojas"}
                 </button>
@@ -2251,35 +2335,12 @@ function Panel({
                   />
                 ) : null}
                 {canEdit && pestana === "inicio" ? (
-                  <>
-                    <Field label="Placa" value={form.placa} onChange={(v) => setForm({ ...form, placa: v.toUpperCase() })} />
-                    <Field label="CC del propietario" value={form.cc} onChange={(v) => setForm({ ...form, cc: v })} />
-                    <Field label="Nombre" value={form.nombre} onChange={(v) => setForm({ ...form, nombre: v })} />
-                    <Field label="Celular" value={form.telefono} onChange={(v) => setForm({ ...form, telefono: v })} />
-                    <OtrosPropietarios valor={form.copropietarios} onChange={(copropietarios) => setForm((actual) => (actual ? { ...actual, copropietarios } : actual))} />
-                    <EmpresaSelect value={form.empresa} onChange={(v) => setForm({ ...form, empresa: v })} />
-                    <Origen key={form.id} value={form.origen} onChange={(v) => setForm({ ...form, origen: v })} />
-                  </>
+                  <DatosDeParte parte="Inicio" form={form} campos={camposCfg} faltan={faltanFirma} onChange={(patch) => setForm({ ...form, ...patch })} />
                 ) : null}
                 {canEdit && pestana === "firma" ? (
                   <>
                     <SubirContrato busy={leyendo || busy} onFile={tomarContrato} />
-                    <DatosContrato
-                      direccion={form.direccion}
-                      correo={form.correo}
-                      marca={form.marca}
-                      linea={form.linea}
-                      modelo={form.modelo}
-                      capacidad={form.capacidad}
-                      clase={form.clase}
-                      carroceria={form.carroceria}
-                      motor={form.motor}
-                      serie={form.serie}
-                      cilindraje={form.cilindraje}
-                      servicio={form.servicio}
-                      fechaFirma={form.fechaFirma}
-                      onChange={(patch) => setForm({ ...form, ...patch })}
-                    />
+                    <DatosDeParte parte="Firma" form={form} campos={camposCfg} faltan={faltanFirma} onChange={(patch) => setForm({ ...form, ...patch })} />
                     <EnviarFirma
                       casoId={form.id}
                       correo={form.correo}
@@ -2300,14 +2361,18 @@ function Panel({
                       cilindraje={form.cilindraje}
                       servicio={form.servicio}
                       copropietarios={form.copropietarios}
+                      exigir={(camposCfg.length ? camposCfg : DATOS_CONTRATO.map((dato) => ({ campo: dato.campo, label: dato.label, pide: dato.pide })))
+                        .filter((campo) => campo.pide === "Firma" && !["firma", "dia", "mes", "ano", "nitAnterior", "copropietario", "cc2"].includes(campo.campo))
+                        .map((campo) => ({ clave: campo.campo, label: campo.label, valor: valorDato(form, campo.campo) }))}
+                      onFaltan={setFaltanFirma}
                       onEnviado={(id) => setForm((actual) => (actual ? { ...actual, docusealId: id, docusealEstado: "pendiente" } : actual))}
                     />
-                    {form.docusealId ? (
+                    {form.docusealId && (form.docusealId.includes("-") || form.docusealId.startsWith("env_")) ? (
                       <div className="grid gap-2 rounded-2xl border border-line p-3 text-sm">
                         <p>
                           {form.docusealEstado === "completed"
-                            ? "DocuSeal guardó la firma y el certificado."
-                            : "DocuSeal está esperando la firma. Cuando terminen, trae el certificado."}
+                            ? "DocuSign guardó la firma y el certificado."
+                            : "DocuSign está esperando la firma. Cuando terminen, trae el certificado."}
                         </p>
                         {form.docusealEstado !== "completed" ? (
                           <button type="button" onClick={() => void traerDocuseal()} className="h-10 rounded-2xl border border-line font-semibold">
@@ -2922,10 +2987,10 @@ function FotoApertura({
           />
         </label>
         <label className="inline-flex h-11 cursor-pointer items-center rounded-2xl border border-line px-3 text-sm font-semibold">
-          Subir foto
+          Subir foto o PDF
           <input
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf,.pdf"
             disabled={leyendo}
             className="sr-only"
             onChange={(e) => {
@@ -2941,6 +3006,14 @@ function FotoApertura({
 }
 
 type FotoApertura = { tipo: "cedula_frente" | "cedula_reverso" | "tarjeta_propiedad_frente" | "tarjeta_propiedad_reverso" | "tarjeta_operacion"; nombre: string; archivo: string; lectura: string };
+
+const NOMBRE_LADO: Record<FotoApertura["tipo"], string> = {
+  cedula_frente: "cédula de frente",
+  cedula_reverso: "cédula de atrás",
+  tarjeta_propiedad_frente: "tarjeta de propiedad de frente",
+  tarjeta_propiedad_reverso: "tarjeta de propiedad de atrás",
+  tarjeta_operacion: "tarjeta de operación",
+};
 
 function borradorVacio(): CasoDraft {
   return {
@@ -2998,6 +3071,86 @@ function SubirContrato({ busy, onFile }: { busy: boolean; onFile: (file: File) =
         }}
       />
     </label>
+  );
+}
+
+function valorDato(form: Caso, campo: string) {
+  if (campo === "datosExtra") return "";
+  const directo = (form as unknown as Record<string, unknown>)[campo];
+  if (typeof directo === "string") return directo;
+  try {
+    const extra = JSON.parse(form.datosExtra || "{}") as Record<string, string>;
+    return extra[campo] || "";
+  } catch {
+    return "";
+  }
+}
+
+function DatosDeParte({
+  parte,
+  form,
+  campos,
+  faltan,
+  onChange,
+}: {
+  parte: string;
+  form: Caso;
+  campos: { campo: string; label: string; pide: string }[];
+  faltan: string[];
+  onChange: (patch: Partial<Caso>) => void;
+}) {
+  const lista = (campos.length ? campos : DATOS_CONTRATO.map((dato) => ({ campo: dato.campo, label: dato.label, pide: dato.pide }))).filter((campo) => campo.pide === parte);
+  const vistos = new Set<string>();
+  const items = lista.filter((campo) => {
+    if (vistos.has(campo.campo) || campo.campo === "firma") return false;
+    vistos.add(campo.campo);
+    return true;
+  });
+  let extra: Record<string, string> = {};
+  try {
+    extra = JSON.parse(form.datosExtra || "{}") as Record<string, string>;
+  } catch {
+    extra = {};
+  }
+  const coprop = items.some((campo) => campo.campo === "copropietario" || campo.campo === "cc2");
+  const fecha = items.some((campo) => campo.campo === "dia" || campo.campo === "mes" || campo.campo === "ano");
+  function ponerExtra(campo: string, valor: string) {
+    onChange({ datosExtra: JSON.stringify({ ...extra, [campo]: valor }) });
+  }
+  return (
+    <div className="grid gap-3 rounded-2xl bg-paper p-3">
+      <p className="text-xs font-semibold tracking-wide text-ink-soft uppercase">{parte === "Firma" ? "Datos del contrato" : "Datos del seguimiento"}</p>
+      {items.map((campo) => {
+        if (["copropietario", "cc2", "dia", "mes", "ano", "nitAnterior", "firma"].includes(campo.campo)) return null;
+        if (campo.campo === "empresa") return <EmpresaSelect key="empresa" value={form.empresa} onChange={(valor) => onChange({ empresa: valor })} />;
+        if (campo.campo === "origen") return <Origen key={`${form.id}-origen`} value={form.origen} onChange={(valor) => onChange({ origen: valor })} />;
+        if (campo.campo === "placa") return <Field key="placa" label="Placa" value={form.placa} malo={faltan.includes("placa")} onChange={(valor) => onChange({ placa: valor.toUpperCase() })} />;
+        const conocido = ["cc", "nombre", "telefono", "direccion", "correo", "marca", "linea", "modelo", "capacidad", "clase", "carroceria", "motor", "serie", "cilindraje", "servicio"].includes(campo.campo);
+        if (conocido) {
+          const valor = String((form as unknown as Record<string, unknown>)[campo.campo] ?? "");
+          return (
+            <Field
+              key={campo.campo}
+              label={campo.label}
+              value={valor}
+              malo={faltan.includes(campo.campo)}
+              onChange={(siguiente) => onChange({ [campo.campo]: campo.campo === "capacidad" ? siguiente.replace(/\D/g, "").slice(0, 2) : siguiente } as Partial<Caso>)}
+            />
+          );
+        }
+        return <Field key={campo.campo} label={campo.label} optional value={extra[campo.campo] ?? ""} malo={faltan.includes(campo.campo)} onChange={(valor) => ponerExtra(campo.campo, valor)} />;
+      })}
+      {coprop ? <OtrosPropietarios valor={form.copropietarios} onChange={(copropietarios) => onChange({ copropietarios })} /> : null}
+      {fecha ? (
+        <label className={"text-sm font-medium " + (faltan.includes("fechaFirma") ? "text-danger" : "")}>
+          Fecha de firma
+          <input type="date" value={form.fechaFirma} onChange={(event) => onChange({ fechaFirma: event.target.value })} className="mt-1 h-11 w-full rounded-2xl border border-line px-3" />
+        </label>
+      ) : null}
+      {items.some((campo) => campo.campo === "nitAnterior") ? (
+        <Field label="NIT de la empresa anterior" optional value={extra.nitAnterior ?? ""} onChange={(valor) => ponerExtra("nitAnterior", valor)} />
+      ) : null}
+    </div>
   );
 }
 
@@ -3163,20 +3316,22 @@ function Field({
   value,
   onChange,
   optional,
+  malo,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   optional?: boolean;
+  malo?: boolean;
 }) {
   return (
-    <label className="text-sm font-medium">
+    <label className={"text-sm font-medium " + (malo ? "text-danger" : "")}>
       {label}
       <input
         required={!optional}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 h-11 w-full rounded-2xl border border-line px-3"
+        className={"mt-1 h-11 w-full rounded-2xl border px-3 " + (malo ? "border-danger" : "border-line")}
       />
     </label>
   );
@@ -3195,8 +3350,9 @@ function EstadoIntranet({ placa }: { placa: string }) {
     setBusy(true);
     try {
       setDato(await consultarTarjeta({ data: limpia }));
-    } catch {
-      setDato({ ok: false, estado: "Sin respuesta", detalle: "No pude consultar la intranet de Taxis Libres.", bloqueo: "" });
+    } catch (err) {
+      const aviso = err instanceof Error ? err.message : "No pude consultar la intranet de Taxis Libres.";
+      setDato({ ok: false, estado: "Sin respuesta", detalle: aviso, bloqueo: "" });
     } finally {
       setBusy(false);
     }

@@ -1,0 +1,638 @@
+{
+  "slug": "uV1LeySFQhrBo9",
+  "name": "Contrato Vinculación Múltiple TL",
+  "schema": [
+    {
+      "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+      "name": "CONTRATO VINCULACION TL DIGITAL"
+    }
+  ],
+  "fields": [
+    {
+      "uuid": "b85b4ce5-4226-4d2c-ae26-8e4f673d3c79",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Nombres y apellidos",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "top"
+      },
+      "areas": [
+        {
+          "x": 0.09317008196464648,
+          "y": 0.1135518459769352,
+          "w": 0.4679247371946887,
+          "h": 0.06912905556517626,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "7bf2726f-da38-4be2-a95b-d4eeb9bd1dcd",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Identificacion",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "top"
+      },
+      "areas": [
+        {
+          "x": 0.5687375151809853,
+          "y": 0.113576804009895,
+          "w": 0.3511060820819668,
+          "h": 0.07266281639342652,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "f1d4cd86-6751-4fdc-a5f2-c9a771dd69f9",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Telefono",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.6468697175305193,
+          "y": 0.1980227021420908,
+          "w": 0.1902439024390244,
+          "h": 0.01339285714285714,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "d180b8ff-1157-4984-9ecb-4dd5f9c5120f",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Direccion",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1725307828900373,
+          "y": 0.1952148522436061,
+          "w": 0.3866090020561992,
+          "h": 0.01593487683182016,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "b45a169a-0ccc-4670-a18a-0eddc65611ad",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Marca",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1459943474552497,
+          "y": 0.262501181318488,
+          "w": 0.2283947043531569,
+          "h": 0.01270601489092621,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "e0b4ee61-1004-40a2-80d7-750014224b51",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Linea",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.4248501087500218,
+          "y": 0.2623249105156722,
+          "w": 0.1792554630974855,
+          "h": 0.012882285693742,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "e1531e72-54a3-4843-9d8f-d9312b52d83a",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Clase",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.687144160478916,
+          "y": 0.2616940589953783,
+          "w": 0.1701263872066869,
+          "h": 0.01410652084034181,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "e0ab7b81-ca79-4e7a-9f3e-41b0594a8764",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Modelo",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1559515795647943,
+          "y": 0.279468464343023,
+          "w": 0.2164824380305136,
+          "h": 0.01353166663218031,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "3b83b10b-beea-469d-912c-5ae96d34e8dc",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Carroceria",
+      "type": "text",
+      "required": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.4757473118257124,
+          "y": 0.2987228658127907,
+          "w": 0.1400690658552026,
+          "h": 0.01324334736302135,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "164e0676-b6fe-4698-aed1-c633a16688a1",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Motor",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.4529840793713171,
+          "y": 0.2805957018145378,
+          "w": 0.1726111040054321,
+          "h": 0.01357239348097766,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "f591e086-2bdb-4a7f-ad72-a1bc80e0d801",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Serie",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1582431370734048,
+          "y": 0.2979112363410708,
+          "w": 0.2102665924299197,
+          "h": 0.01466037899971923,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "a62017f8-7bb6-4321-9913-522e595c7e2c",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Placa",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1464628774028869,
+          "y": 0.3161125568041055,
+          "w": 0.2289036915120691,
+          "h": 0.01306775068534688,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "f3066904-a719-4c90-b10b-2ff9824bbdfa",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Cillindraje",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.7229667231133218,
+          "y": 0.2969554579990891,
+          "w": 0.1646085513043195,
+          "h": 0.01620288654694618,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "53f2d38c-b236-4225-ad3f-bd16230adede",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Servicio",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.763386806464632,
+          "y": 0.2808099517179135,
+          "w": 0.1261310203710692,
+          "h": 0.01277393900784179,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 0
+        }
+      ]
+    },
+    {
+      "uuid": "a6925da2-ec79-486c-b167-4006f285979b",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Correo",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 9,
+        "align": "left"
+      },
+      "areas": [
+        {
+          "x": 0.2032707609050065,
+          "y": 0.5743150792319097,
+          "w": 0.211219512195122,
+          "h": 0.01461895961921422,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 1
+        }
+      ]
+    },
+    {
+      "uuid": "32943ce7-e1dd-461c-9edb-569ccba83cff",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "dia",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1789536301453647,
+          "y": 0.6014604460352035,
+          "w": 0.04527965054325706,
+          "h": 0.01204461762399378,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 1
+        }
+      ]
+    },
+    {
+      "uuid": "4b169db2-be9c-4501-8ad7-389880128e98",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "mes",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.3148644442314585,
+          "y": 0.5996539141686715,
+          "w": 0.1220821862907578,
+          "h": 0.0148179453841446,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 1
+        }
+      ]
+    },
+    {
+      "uuid": "69486815-fe24-402f-a782-803e5facfef0",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "año",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.4576425536488249,
+          "y": 0.6018971472283188,
+          "w": 0.02647291699642729,
+          "h": 0.01238961653275927,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 1
+        }
+      ]
+    },
+    {
+      "uuid": "4d0455b4-57b3-4b78-9fbd-2d221471b65d",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "dia",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 11,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.3445729830320674,
+          "y": 0.4846228169738065,
+          "w": 0.04527965054325706,
+          "h": 0.01204461762399378,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "uuid": "d1141666-445c-449c-9277-1dfd92acbb25",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "mes",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 11,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.5146927564574763,
+          "y": 0.4851845749829847,
+          "w": 0.1365388243657291,
+          "h": 0.01222159645774146,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "uuid": "a16da05c-161d-4b54-8dc1-10cbb07815c3",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "año",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 11,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.6897288993568995,
+          "y": 0.4856413645763272,
+          "w": 0.02647291699642729,
+          "h": 0.01238961653275927,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "uuid": "cbfe0e40-dc18-4a59-b740-88d0569f875b",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Telefono",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1628826167625876,
+          "y": 0.5233369458311414,
+          "w": 0.272299737557661,
+          "h": 0.01142831282182177,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "uuid": "cc95133b-6834-42d4-8ab6-d91c043c5f0b",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Direccion",
+      "type": "text",
+      "required": true,
+      "readonly": true,
+      "preferences": {
+        "font_size": 10,
+        "align": "left",
+        "valign": "center"
+      },
+      "areas": [
+        {
+          "x": 0.1724799087342695,
+          "y": 0.5452992803564087,
+          "w": 0.2634825817404628,
+          "h": 0.0134163944644361,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "uuid": "85ec8325-9ce4-4b5d-87a4-eb44da729c63",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Firma Copropietarios",
+      "type": "signature",
+      "required": true,
+      "preferences": {},
+      "areas": [
+        {
+          "x": 0,
+          "y": 0.569890386027126,
+          "w": 0.4848484848484849,
+          "h": 0.3097062925019368,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 2
+        }
+      ]
+    },
+    {
+      "uuid": "b8337361-8139-46cb-a897-bea7da871c0a",
+      "submitter_uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+      "name": "Firma Copropietarios",
+      "type": "signature",
+      "required": true,
+      "preferences": {},
+      "areas": [
+        {
+          "x": 0.482696017734504,
+          "y": 0.6448419869848162,
+          "w": 0.4283261306136782,
+          "h": 0.3148232924688227,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 1
+        }
+      ]
+    },
+    {
+      "uuid": "fbb4733e-da5f-4346-b7a6-2cce4e972b6a",
+      "submitter_uuid": "dd3861b3-93c0-4937-bc31-5003fd6dafb6",
+      "name": "Firma TL",
+      "type": "signature",
+      "required": true,
+      "preferences": {},
+      "areas": [
+        {
+          "x": 0.05416821262271899,
+          "y": 0.6097000602738532,
+          "w": 0.288910628064287,
+          "h": 0.08874691119209266,
+          "attachment_uuid": "15fdd01d-77f5-49a1-94f8-452dd4fb77cf",
+          "page": 1
+        }
+      ]
+    }
+  ],
+  "submitters": [
+    {
+      "name": "Primera Parte",
+      "uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49"
+    },
+    {
+      "name": "Segunda Parte",
+      "uuid": "dd3861b3-93c0-4937-bc31-5003fd6dafb6"
+    }
+  ],
+  "account_id": 1,
+  "archived_at": null,
+  "source": "native",
+  "folder_id": 7,
+  "external_id": null,
+  "preferences": {
+    "request_email_subject": "Teleopciones SAS tiene un documento para firma",
+    "request_email_body": "Hola,\n\n¡Te felicitamos! Ahora casi parte oficial de la familia **Taxis Libres**. \n\nPara completar tu proceso e ingresar formalmente, por favor revisa y firma el documento digital correspondiente a tu vehículo haciendo clic en el siguiente enlace:\n\n👉 [[Revisar y Firmar Documento]]({submitter.link})\n\nSi tienes alguna duda o inconveniente durante el proceso de firma, puedes responder directamente a este correo o contactar con tu asesor asignado.\n\n¡Bienvenido a bordo!\n\nAtentamente,\n\n**Equipo de Taxis Libres**",
+    "submitters": [
+      {
+        "uuid": "dfcf1a02-2a68-4df1-84e7-6695d52a7f49",
+        "request_email_subject": "¡Bienvenido a Taxis Libres! 🚖 Tu contrato está listo para firmar",
+        "request_email_body": "Hola,  \n  \n¡Te felicitamos! Ahora casi eres parte oficial de la familia **Taxis Libres**.  \n  \nPara completar tu proceso e ingresar formalmente, por favor revisa y firma el documento digital correspondiente a tu vehículo haciendo clic en el siguiente enlace:  \n  \n👉 [[Revisar y Firmar Documento]]({submitter.link})  \n  \nSi tienes alguna duda o inconveniente durante el proceso de firma, puedes responder directamente a este correo o contactar con tu asesor asignado.  \n  \n¡Bienvenido a bordo!  \n  \nAtentamente,  \n  \n**Equipo de Taxis Libres**"
+      },
+      {
+        "uuid": null,
+        "request_email_subject": "🚖 Nuevo contrato está listo para firmar",
+        "request_email_body": "Hola,  \n  \nPara completar tu proceso e ingresar formalmente, por favor revisa y firma el documento digital correspondiente a tu vehículo haciendo clic en el siguiente enlace:  \n  \n👉 [[Revisar y Firmar Documento]]({submitter.link})  \n  \n¡Bienvenido a bordo!  \n  \nAtentamente,  \n  \n**Equipo de Taxis Libres**"
+      }
+    ],
+    "documents_copy_email_subject": "¡Proceso completado! 📄 Tu contrato ya firmado de Taxis Libres",
+    "documents_copy_email_body": "Hola,  \n  \n¡Excelentes noticias! El proceso de firma de tu documento ha finalizado exitosamente por parte de Gerencia.  \n  \nAdjunto a este correo encontrarás la copia oficial en formato PDF de tu contrato debidamente firmado y legalizado. También puedes descargarlo o consultarlo en cualquier momento haciendo clic en el siguiente enlace:  \n  \n👉 [[Descargar Copia del Documento]]({documents.link})  \n  \nAgradecemos tu confianza en nosotros. ¡Bienvenido oficialmente a la familia Taxis Libres!  \n  \nSi tienes alguna pregunta, no dudes en comunicarte con nosotros.  \n  \nAtentamente,  \n  \n**Equipo de Taxis Libres**",
+    "completed_notification_email_subject": "✅ Contrato finalizado y firmado: {template.name}",
+    "completed_notification_email_body": "Hola,  \n  \nTe informamos que el proceso del documento {template.name}ha sido completado exitosamente por todos los participantes  {submission.submitters}.  \n  \nPuedes revisar, descargar o verificar el estado final del documento haciendo clic en el siguiente enlace:  \n  \n👉 [[Ver Documento Completado]]({submission.link})  \n  \nAtentamente,  \n  \n**Sistema de Firmas Teleopciones SAS**",
+    "documents_copy_email_enabled": false,
+    "documents_copy_email_attach_audit": false,
+    "documents_copy_email_attach_documents": false,
+    "request_email_enabled": false,
+    "completed_notification_email_attach_documents": false,
+    "completed_notification_email_enabled": false,
+    "completed_notification_email_attach_audit": false,
+    "submitters_order": "preserved"
+  },
+  "shared_link": false,
+  "variables_schema": {}
+}

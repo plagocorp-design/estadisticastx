@@ -69,6 +69,7 @@ export type Caso = {
   manoAsignado: string;
   devolucion: string;
   copropietarios: string;
+  datosExtra: string;
   citaFecha: string;
   citaHora: string;
   entrega: string;
@@ -266,6 +267,7 @@ export function toCaso(row: CasoRow): Caso {
     manoAsignado: String(row.mano_asignado ?? ""),
     devolucion: String(row.devolucion ?? ""),
     copropietarios: String(row.copropietarios ?? ""),
+    datosExtra: String(row.datos_extra ?? ""),
     citaFecha: String(row.cita_fecha ?? ""),
     citaHora: String(row.cita_hora ?? ""),
     entrega: entregaLista(row.entrega),

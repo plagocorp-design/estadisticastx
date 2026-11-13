@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/login",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Vincula Libre",
+      "hasCanvas": false,
+      "bodyTextLen": 516,
+      "bodyTextHash": "f56999d87f113814287f8d8c05f20b3c91d98b32c6abd23f2beb5cebfb80031c",
+      "bodyTextPrefix": "RADIO TAXI AEROPUERTO Vincula Libre El sistema de seguimiento de",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/login.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Vincula Libre",
+      "hasCanvas": false,
+      "bodyTextLen": 516,
+      "bodyTextHash": "f56999d87f113814287f8d8c05f20b3c91d98b32c6abd23f2beb5cebfb80031c",
+      "bodyTextPrefix": "RADIO TAXI AEROPUERTO Vincula Libre El sistema de seguimiento de",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/login-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/login.json"
+}

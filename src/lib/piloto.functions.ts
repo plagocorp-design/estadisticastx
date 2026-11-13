@@ -692,6 +692,18 @@ export const leerDocumento = createServerFn({ method: "POST" })
     return leerArchivo(data.nombre, data.archivo, data.tipo, data.actual ?? {});
   });
 
+export const leerPaginas = createServerFn({ method: "POST" })
+  .validator((input: { paginas: { nombre: string; archivo: string }[]; preferido?: string; actual?: Record<string, string> }) => input)
+  .middleware([authMiddleware])
+  .handler(async ({ data }) => {
+    const paginas = (data.paginas || []).filter((pagina) => pagina.archivo && pagina.archivo.length > 40).slice(0, 8);
+    if (!paginas.length) throw new Error("El archivo llegó vacío");
+    if (paginas.some((pagina) => pagina.archivo.length > 12_000_000)) throw new Error("Una página pesa demasiado");
+    const { leerVarias } = await import("./ocr.server");
+    const leidas = await leerVarias(paginas, data.preferido || "", data.actual ?? {});
+    return { paginas: leidas };
+  });
+
 export const bajarDocumento = createServerFn({ method: "POST" })
   .validator((id: number) => id)
   .middleware([authMiddleware])

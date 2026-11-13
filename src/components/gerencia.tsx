@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { BarChart3, FileText, KeyRound, LayoutDashboard, ListChecks, LogOut, Users } from "lucide-react";
+import { BarChart3, FileText, KeyRound, LayoutDashboard, ListChecks, LogOut, Mail, Users } from "lucide-react";
 import { signOut } from "@/lib/auth/client";
 import { SelectorAcceso } from "@/components/equipo";
 import { accesoVacio, type Acceso } from "@/lib/team.public";
-import { parteDeDoc, type CiudadConfig } from "@/lib/gerencia";
+import { parteDeDoc, TEXTOS_BASE, type CiudadConfig } from "@/lib/gerencia";
 import {
   claveUsuario,
   crearCiudad,
@@ -26,6 +26,7 @@ import {
 } from "@/lib/gerencia.functions";
 import { etiquetaRol } from "@/lib/team.public";
 import { EditorContrato } from "@/components/gerencia-contrato";
+import { CatalogoDatos } from "@/components/catalogo-datos";
 import { MapaPais } from "@/components/gerencia-mapa";
 
 type Ciudad = {
@@ -51,6 +52,7 @@ const SECCIONES = [
   ["documentos", "Documentos", FileText],
   ["pasos", "Pasos", ListChecks],
   ["contrato", "Contrato", FileText],
+  ["correos", "Correos", Mail],
 ] as const;
 
 type Seccion = (typeof SECCIONES)[number][0] | "accesos";
@@ -179,8 +181,10 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
     setError("");
     try {
       await guardarConfigCiudad({ data: { ciudadId, config } });
+      setAviso("Quedó guardado.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No pude guardar");
+      setAviso("");
     } finally {
       setOcupado(false);
     }
@@ -558,7 +562,37 @@ export function GerenciaVista({ nombre, onEntrar }: { nombre: string; onEntrar?:
                 </label>
                 <button type="button" disabled={ocupado} onClick={() => void guardar()} className="h-11 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper">Guardar posiciones</button>
               </div>
+              <div className="mt-4">
+                <CatalogoDatos campos={config.contratoCampos} onChange={(contratoCampos) => setConfig({ ...config, contratoCampos })} />
+              </div>
               {pdf ? <div className="mt-4"><EditorContrato pdf={pdf} campos={config.contratoCampos} onChange={(contratoCampos) => setConfig({ ...config, contratoCampos })} /></div> : <p className="mt-3 text-sm text-ink-soft">Cargando el contrato…</p>}
+            </section>
+          ) : null}
+
+          {seccion === "correos" && config ? (
+            <section className="rounded-card border border-line bg-card p-4">
+              <h2 className="font-semibold">Correo de firma</h2>
+              <p className="mt-1 text-sm text-ink-soft">Este es el correo que DocuSign manda al propietario. Escribe {"{nombre}"} y {"{placa}"} donde quieras que salgan los datos. El botón de firmar lo pone DocuSign.</p>
+              <label className="mt-4 grid gap-1 text-sm font-semibold">
+                Asunto
+                <input
+                  value={config.textos.correo_firma_asunto || TEXTOS_BASE.find((item) => item.clave === "correo_firma_asunto")?.valor || ""}
+                  onChange={(event) => setConfig({ ...config, textos: { ...config.textos, correo_firma_asunto: event.target.value } })}
+                  className="h-11 rounded-2xl border border-line px-3 font-normal"
+                />
+              </label>
+              <label className="mt-3 grid gap-1 text-sm font-semibold">
+                Mensaje
+                <textarea
+                  value={config.textos.correo_firma_cuerpo || TEXTOS_BASE.find((item) => item.clave === "correo_firma_cuerpo")?.valor || ""}
+                  onChange={(event) => setConfig({ ...config, textos: { ...config.textos, correo_firma_cuerpo: event.target.value } })}
+                  rows={8}
+                  className="rounded-2xl border border-line px-3 py-2 font-normal"
+                />
+              </label>
+              <button type="button" disabled={ocupado} onClick={() => void guardar()} className="mt-3 h-11 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper">
+                Guardar correo
+              </button>
             </section>
           ) : null}
 

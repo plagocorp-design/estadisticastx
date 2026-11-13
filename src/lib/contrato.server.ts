@@ -13,7 +13,7 @@ function pdfBytes(base64: string) {
 
 function firmaDigital(data: Uint8Array) {
   const raw = Buffer.from(data).toString("latin1");
-  return raw.includes("/Type/Sig") && (raw.includes("adbe.pkcs7") || raw.includes("DocuSeal"));
+  return raw.includes("/Type/Sig");
 }
 
 function conFirma(leido: ContratoLeido, data: Uint8Array) {

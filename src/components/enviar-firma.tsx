@@ -1,15 +1,38 @@
-import { useState, type FormEvent } from "react";
-import { enviarPortal } from "@/lib/firma.functions";
+import { useEffect, useState, type FormEvent } from "react";
+import { enviarPortal, estadoFirma, reenviarFirma } from "@/lib/firma.functions";
 
 function textoCorreo(enlace: string) {
   return `Hola,\n\nTe enviamos el contrato de vinculación para que lo leas y lo firmes.\n\nNo respondas este correo. Entra aquí y firma:\n${enlace}\n\nEl enlace es solo tuyo.\n`;
 }
 
 function falloCorreo(error: string) {
-  if (error.includes("missing_connector_token")) {
-    return "El sitio no pudo usar Gmail. Copia el enlace o ábrelo en tu correo y mándaselo tú.";
-  }
-  return "No salió el correo. Copia el enlace y mándaselo tú.";
+  return error || "No salió el correo.";
+}
+
+type ParteFirma = {
+  id: number;
+  nombre: string;
+  correo: string;
+  firmado: boolean;
+  en: string;
+  ip: string;
+  agente: string;
+  huella: string;
+  tieneFoto: boolean;
+};
+
+const ESTADO: Record<string, string> = {
+  sin_enviar: "Sin enviar",
+  enviado: "Enviado",
+  pendiente: "Pendiente de firma",
+  firmado: "Firmado",
+};
+
+function horaDe(valor: string) {
+  if (!valor) return "";
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return valor;
+  return fecha.toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
 }
 
 export function EnviarFirma({
@@ -32,6 +55,8 @@ export function EnviarFirma({
   cilindraje = "",
   servicio = "PÚBLICO",
   copropietarios = "",
+  exigir = [],
+  onFaltan,
   onEnviado,
 }: {
   casoId: number;
@@ -53,21 +78,11 @@ export function EnviarFirma({
   cilindraje?: string;
   servicio?: string;
   copropietarios?: string;
+  exigir?: { clave: string; label: string; valor: string }[];
+  onFaltan?: (claves: string[]) => void;
   onEnviado?: (id: string) => void;
 }) {
   const [abierto, setAbierto] = useState(false);
-  const [para, setPara] = useState(correo);
-  const [dir, setDir] = useState(direccion);
-  const [marcaV, setMarcaV] = useState(marca);
-  const [lineaV, setLineaV] = useState(linea);
-  const [modeloV, setModeloV] = useState(modelo);
-  const [claseV, setClase] = useState(clase || "AUTOMÓVIL");
-  const [carroceriaV, setCarroceria] = useState(carroceria);
-  const [motorV, setMotor] = useState(motor);
-  const [serieV, setSerie] = useState(serie);
-  const [cilindrajeV, setCilindraje] = useState(cilindraje);
-  const [servicioV, setServicio] = useState(servicio || "PÚBLICO");
-  const [pasajeros, setPasajeros] = useState(capacidad);
   const [nitAnterior, setNitAnterior] = useState("");
   const [otros] = useState<{ nombre: string; cc: string; correo: string }[]>(() => {
     try {
@@ -84,8 +99,30 @@ export function EnviarFirma({
   const [enviados, setEnviados] = useState<{ correo: string; enlace: string; ok: boolean; error: string }[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [copiado, setCopiado] = useState("");
+  const [estado, setEstado] = useState("sin_enviar");
+  const [partes, setPartes] = useState<ParteFirma[]>([]);
+  const [firmados, setFirmados] = useState(0);
+  const [auditoria, setAuditoria] = useState(false);
+  const [otroCorreo, setOtroCorreo] = useState<Record<number, string>>({});
+  const [reenviando, setReenviando] = useState(0);
+
+  async function cargarEstado() {
+    try {
+      const dato = await estadoFirma({ data: casoId });
+      setEstado(dato.estado);
+      setPartes(dato.partes);
+      setFirmados(dato.firmados);
+    } catch {
+      setEstado("sin_enviar");
+    }
+  }
+
+  useEffect(() => {
+    void cargarEstado();
+  }, [casoId]);
 
   async function armar(soloAbrir: boolean) {
+    if (!completos()) return;
     setError("");
     setEnviados([]);
     setGuardando(true);
@@ -93,21 +130,21 @@ export function EnviarFirma({
       const result = await enviarPortal({
         data: {
           casoId,
-          correo: para,
+          correo,
           nombre,
           cc,
           telefono,
-          direccion: dir,
-          marca: marcaV,
-          linea: lineaV,
-          modelo: modeloV,
-          clase: claseV,
-          carroceria: carroceriaV,
-          motor: motorV,
-          serie: serieV,
-          cilindraje: cilindrajeV,
-          servicio: servicioV,
-          capacidad: pasajeros,
+          direccion,
+          marca,
+          linea,
+          modelo,
+          clase,
+          carroceria,
+          motor,
+          serie,
+          cilindraje,
+          servicio,
+          capacidad,
           nitAnterior,
           otros,
           soloAbrir,
@@ -124,6 +161,7 @@ export function EnviarFirma({
       }
       setEnviados(result.enviados);
       if (result.docusealId) onEnviado?.(result.docusealId);
+      await cargarEstado();
       const pendiente = result.enviados.find((item) => !item.ok && item.correo.includes("@"));
       if (pendiente) {
         window.location.href = `mailto:${pendiente.correo}?subject=${encodeURIComponent("Contrato para firmar")}&body=${encodeURIComponent(textoCorreo(pendiente.enlace))}`;
@@ -135,39 +173,76 @@ export function EnviarFirma({
     }
   }
 
+  function completos() {
+    const pedidos = exigir.length
+      ? exigir
+      : [
+          { clave: "correo", label: "Correo", valor: correo },
+          { clave: "direccion", label: "Dirección", valor: direccion },
+          { clave: "marca", label: "Marca", valor: marca },
+          { clave: "linea", label: "Línea", valor: linea },
+          { clave: "modelo", label: "Modelo", valor: modelo },
+          { clave: "clase", label: "Clase", valor: clase },
+          { clave: "carroceria", label: "Carrocería", valor: carroceria },
+          { clave: "motor", label: "Motor", valor: motor },
+          { clave: "serie", label: "Serie", valor: serie },
+          { clave: "cilindraje", label: "Cilindraje", valor: cilindraje },
+          { clave: "servicio", label: "Servicio", valor: servicio },
+          { clave: "capacidad", label: "Pasajeros", valor: capacidad },
+        ];
+    const faltan = pedidos.filter((item) => !item.valor.trim());
+    onFaltan?.(faltan.map((item) => item.clave));
+    if (!faltan.length) return true;
+    setError(`Completa estos datos antes de enviar: ${faltan.map((item) => item.label).join(", ")}.`);
+    return false;
+  }
+
   async function enviar(e: FormEvent) {
     e.preventDefault();
     await armar(false);
   }
 
+  async function reenviar(parte: ParteFirma) {
+    const correo = (otroCorreo[parte.id] || parte.correo).trim();
+    setError("");
+    setReenviando(parte.id);
+    try {
+      await reenviarFirma({ data: { casoId, firmanteId: parte.id, correo } });
+      await cargarEstado();
+      setEnviados([{ correo, enlace: "", ok: true, error: "" }]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No pude reenviar");
+    } finally {
+      setReenviando(0);
+    }
+  }
+
+  const etiqueta = ESTADO[estado] || "Sin enviar";
+  const color =
+    estado === "firmado" ? "bg-[#e7f6d4] text-[#24520f]" : estado === "pendiente" ? "bg-[#fff4d6] text-[#7a4b00]" : estado === "enviado" ? "bg-[#e7eef8] text-[#1b3a4b]" : "bg-paper text-ink-soft";
+
   if (!abierto) {
     return (
-      <button type="button" onClick={() => setAbierto(true)} className="h-11 rounded-2xl border border-line px-4 text-sm font-semibold">
-        Enviar a firmar
-      </button>
+      <div className="grid gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-semibold ${color}`}>{etiqueta}</span>
+          {partes.length ? <span className="text-xs text-ink-soft">{firmados} de {partes.length} firmaron</span> : null}
+        </div>
+        <button type="button" onClick={() => { if (estado === "sin_enviar" && !completos()) return; setAbierto(true); }} className="h-11 rounded-2xl border border-line px-4 text-sm font-semibold">
+          {estado === "sin_enviar" ? "Enviar a firmar" : "Ver firma"}
+        </button>
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
+      </div>
     );
   }
 
   return (
     <form onSubmit={(e) => void enviar(e)} className="grid gap-2 rounded-card border border-line bg-paper p-3">
-      <p className="text-sm font-semibold">Portal de firma · {placa}</p>
-      <p className="text-xs text-ink-soft">El contrato y la carta de desvinculación salen con estos datos. La carta no usa datos de otro cliente. El correo lo manda DocuSeal. Si no sale, copia el enlace.</p>
-      <input value={para} onChange={(e) => setPara(e.target.value)} placeholder="Correo del propietario" className="h-11 rounded-2xl border border-line px-3" />
-      <input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="Dirección" className="h-11 rounded-2xl border border-line px-3" />
-      <div className="grid gap-2 sm:grid-cols-3">
-        <input value={marcaV} onChange={(e) => setMarcaV(e.target.value)} placeholder="Marca" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={lineaV} onChange={(e) => setLineaV(e.target.value)} placeholder="Línea" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={modeloV} onChange={(e) => setModeloV(e.target.value)} placeholder="Modelo" className="h-11 rounded-2xl border border-line px-3" />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold">Portal de firma · {placa}</p>
+        <span className={`inline-flex h-8 items-center rounded-full px-3 text-xs font-semibold ${color}`}>{etiqueta}</span>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <input value={claseV} onChange={(e) => setClase(e.target.value)} placeholder="Clase" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={carroceriaV} onChange={(e) => setCarroceria(e.target.value)} placeholder="Carrocería" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={motorV} onChange={(e) => setMotor(e.target.value)} placeholder="Motor" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={serieV} onChange={(e) => setSerie(e.target.value)} placeholder="Serie" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={cilindrajeV} onChange={(e) => setCilindraje(e.target.value)} placeholder="Cilindraje" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={servicioV} onChange={(e) => setServicio(e.target.value)} placeholder="Servicio" className="h-11 rounded-2xl border border-line px-3" />
-        <input value={pasajeros} onChange={(e) => setPasajeros(e.target.value.replace(/\D/g, "").slice(0, 2))} placeholder="Pasajeros" className="h-11 rounded-2xl border border-line px-3" />
-      </div>
+      <p className="text-xs text-ink-soft">Usa los datos que ya están arriba. El correo sale de vinculaciones@taxislibres.com.co a {correo || "sin correo"}.</p>
       {empresa && !/ninguna/i.test(empresa) ? (
         <input value={nitAnterior} onChange={(e) => setNitAnterior(e.target.value)} placeholder={`NIT de ${empresa}, si lo tienes`} className="h-11 rounded-2xl border border-line px-3" />
       ) : null}
@@ -176,29 +251,75 @@ export function EnviarFirma({
           También firman: {otros.map((parte) => parte.nombre).filter(Boolean).join(", ")}. Los agregas en el seguimiento, no aquí.
         </p>
       ) : null}
+      {partes.length ? (
+        <div className="grid gap-2">
+          {partes.map((parte) => (
+            <div key={parte.id} className="grid gap-2 rounded-2xl border border-line p-3 text-sm">
+              <p className="font-semibold">
+                {parte.nombre} · {parte.firmado ? "Firmado" : "Pendiente de firma"}
+              </p>
+              <p className="text-ink-soft">{parte.correo}</p>
+              {parte.firmado ? <p className="text-ink-soft">{horaDe(parte.en)}{parte.tieneFoto ? " · con foto y cédula" : ""}</p> : null}
+              {!parte.firmado ? (
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    value={otroCorreo[parte.id] ?? parte.correo}
+                    onChange={(e) => setOtroCorreo((actual) => ({ ...actual, [parte.id]: e.target.value }))}
+                    placeholder="Otro correo"
+                    className="h-10 rounded-2xl border border-line px-3"
+                  />
+                  <button type="button" disabled={reenviando === parte.id} onClick={() => void reenviar(parte)} className="h-10 rounded-2xl border border-line px-3 font-semibold disabled:opacity-60">
+                    {reenviando === parte.id ? "Enviando…" : "Reenviar"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ))}
+          <button type="button" onClick={() => setAuditoria((v) => !v)} className="h-10 rounded-2xl text-left text-sm font-semibold text-navy">
+            {auditoria ? "Ocultar registro" : "Registro de la firma"}
+          </button>
+          {auditoria
+            ? partes.filter((parte) => parte.firmado).map((parte) => (
+                <div key={`aud-${parte.id}`} className="rounded-2xl bg-white p-3 text-sm">
+                  <p className="font-semibold">{parte.nombre}</p>
+                  <p>Firmó el {horaDe(parte.en) || "sin hora"} desde {parte.ip || "una conexión sin IP visible"}.</p>
+                  <p className="text-ink-soft">{parte.agente || "Sin dato del navegador"}</p>
+                  <p className="text-ink-soft">Huella {parte.huella || "—"}. {parte.tieneFoto ? "Quedó la foto con la cédula." : "No quedó foto."}</p>
+                </div>
+              ))
+            : null}
+          {auditoria && !partes.some((parte) => parte.firmado) ? <p className="text-sm text-ink-soft">Todavía nadie firma. El registro aparece cuando firmen.</p> : null}
+        </div>
+      ) : null}
       {error ? <p className="text-sm text-danger">{error}</p> : null}
       {enviados.map((item) => (
-        <div key={item.enlace} className="grid gap-2 rounded-2xl border border-line p-3 text-sm">
-          <p>{item.ok ? `DocuSeal lo envió a ${item.correo}` : `No salió a ${item.correo}. ${falloCorreo(item.error)}`}</p>
-          <p className="break-all text-ink-soft">{item.enlace}</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard.writeText(item.enlace);
-                setCopiado(item.enlace);
-              }}
-              className="h-10 rounded-2xl border border-line font-semibold"
-            >
-              {copiado === item.enlace ? "Copiado" : "Copiar enlace"}
-            </button>
-            <a
-              href={`mailto:${item.correo}?subject=${encodeURIComponent("Contrato para firmar")}&body=${encodeURIComponent(textoCorreo(item.enlace))}`}
-              className="grid h-10 place-items-center rounded-2xl bg-navy font-semibold text-paper"
-            >
-              Abrir en mi correo
-            </a>
-          </div>
+        <div key={item.correo} className="grid gap-2 rounded-2xl border border-line p-3 text-sm">
+          <p>{item.ok ? `Se envió desde vinculaciones@ a ${item.correo}` : `No salió a ${item.correo}. ${falloCorreo(item.error)}`}</p>
+          {item.enlace ? (
+            <>
+              <p className="break-all text-ink-soft">{item.enlace}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(item.enlace);
+                    setCopiado(item.enlace);
+                  }}
+                  className="h-10 rounded-2xl border border-line font-semibold"
+                >
+                  {copiado === item.enlace ? "Copiado" : "Copiar enlace"}
+                </button>
+                <a
+                  href={`mailto:${item.correo}?subject=${encodeURIComponent("Contrato para firmar")}&body=${encodeURIComponent(textoCorreo(item.enlace))}`}
+                  className="grid h-10 place-items-center rounded-2xl bg-navy font-semibold text-paper"
+                >
+                  Abrir en mi correo
+                </a>
+              </div>
+            </>
+          ) : (
+            <p className="text-ink-soft">El enlace para firmar llega en ese correo.</p>
+          )}
         </div>
       ))}
       <div className="grid gap-2 sm:grid-cols-2">

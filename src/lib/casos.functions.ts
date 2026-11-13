@@ -305,6 +305,7 @@ export type CasoPatch = {
   citaHora?: string;
   entrega?: string;
   copropietarios?: string;
+  datosExtra?: string;
 } & Record<StepKey, boolean>;
 
 export const updateCaso = createServerFn({ method: "POST" })
@@ -327,6 +328,7 @@ export const updateCaso = createServerFn({ method: "POST" })
       ? clean(data.fechaProxima, 10)
       : "";
     const sql = await getSql();
+    await sql.query(`alter table casos add column if not exists datos_extra text not null default ''`);
     const previas = await sql.query<Record<string, unknown> & { polizas_subidas: boolean; fecha_poliza: string; fecha_cierre: string; owner_slug: string }>(
       `select c.*, p.slug as owner_slug
        from casos c join profiles p on p.user_id = c.owner_id
@@ -387,6 +389,7 @@ export const updateCaso = createServerFn({ method: "POST" })
       dato(data.serie, 24),
       dato(data.cilindraje, 12),
       dato(data.servicio, 20),
+      dato(data.datosExtra, 4000),
     ];
     let text = `update casos set
       placa = $1, cc = $2, nombre = $3, telefono = $4, empresa = $5,
@@ -401,7 +404,7 @@ export const updateCaso = createServerFn({ method: "POST" })
       poliza_fase = case when $18 then poliza_fase else '' end,
       poliza_entrega = case when $18 then poliza_entrega else '' end,
       cita_fecha = $37, cita_hora = $38, entrega = $39, copropietarios = $40, capacidad = $41,
-      clase = $42, carroceria = $43, motor = $44, serie = $45, cilindraje = $46, servicio = $47,
+      clase = $42, carroceria = $43, motor = $44, serie = $45, cilindraje = $46, servicio = $47, datos_extra = $48,
       updated_at = now()`;
     if (data.contratoPdf && data.contratoPdf.length > 80) {
       params.push(dato(data.contratoNombre, 120), data.contratoPdf);
@@ -487,6 +490,17 @@ export const updateCaso = createServerFn({ method: "POST" })
           antes: cambio.antes,
           despues: cambio.despues,
         });
+        const { avisarEstado } = await import("./avisos.server");
+        void avisarEstado({
+          antesTarjeta: textoPlano(previa.estado_tarjeta),
+          ahoraTarjeta: tarjeta,
+          antesEntregada: Boolean(previa.tarjeta_entregada),
+          ahoraEntregada: Boolean(data.tarjetaEntregada),
+          correo: dato(data.correo, 80),
+          nombre,
+          placa,
+          asesor: profile.name,
+        }).catch(() => undefined);
       }
     }
     const { notificarSheets } = await import("./sheets.server");

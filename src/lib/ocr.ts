@@ -347,3 +347,110 @@ export function analizarTexto(
           : "Lo leí. No encontré una fecha de vencimiento ni datos distintos a los del proceso.";
   return { vigencia, vence: mostrar(vence), aviso, campos };
 }
+
+export const LADOS = [
+  "cedula_frente",
+  "cedula_reverso",
+  "tarjeta_propiedad_frente",
+  "tarjeta_propiedad_reverso",
+  "tarjeta_operacion",
+] as const;
+
+export type Lado = (typeof LADOS)[number];
+
+const PESOS: Record<Lado, [RegExp, number][]> = {
+  cedula_frente: [
+    [/CEDULA DE CIUDADAN/, 6],
+    [/NUIP/, 4],
+    [/REPUBLICA DE COLOMBIA/, 2],
+    [/APELLIDOS/, 2],
+    [/NACIONALIDAD/, 2],
+  ],
+  cedula_reverso: [
+    [/FECHA DE NACIMIENTO/, 5],
+    [/ESTATURA/, 4],
+    [/GRUPO SANGUINEO|G\.S\./, 4],
+    [/INDICE DERECHO/, 5],
+    [/LUGAR DE NACIMIENTO/, 3],
+    [/FECHA Y LUGAR DE EXPEDICI/, 4],
+    [/SEXO/, 2],
+  ],
+  tarjeta_propiedad_frente: [
+    [/LICENCIA DE TRANSITO/, 6],
+    [/TARJETA DE PROPIEDAD/, 3],
+    [/CLASE DE VEHICULO/, 3],
+    [/CILINDRAJE/, 2],
+  ],
+  tarjeta_propiedad_reverso: [
+    [/DATOS DEL PROPIETARIO/, 5],
+    [/GRAVAMEN/, 4],
+    [/CAPACIDAD/, 3],
+    [/CHASIS/, 3],
+    [/MOTOR/, 2],
+    [/PROPIETARIO/, 2],
+  ],
+  tarjeta_operacion: [
+    [/TARJETA DE OPERACI/, 6],
+    [/EMPRESA DE TRANSPORTE/, 3],
+    [/RADICADO/, 2],
+  ],
+};
+
+function puntajeLado(texto: string) {
+  const base = plano(texto);
+  const salida = {} as Record<Lado, number>;
+  for (const lado of LADOS) {
+    salida[lado] = PESOS[lado].reduce((suma, [regla, peso]) => suma + (regla.test(base) ? peso : 0), 0);
+  }
+  return salida;
+}
+
+function familiaDe(puntaje: Record<Lado, number>) {
+  const cedula = puntaje.cedula_frente + puntaje.cedula_reverso;
+  const propiedad = puntaje.tarjeta_propiedad_frente + puntaje.tarjeta_propiedad_reverso;
+  const operacion = puntaje.tarjeta_operacion;
+  const mayor = Math.max(cedula, propiedad, operacion);
+  if (mayor < 3) return "";
+  if (mayor === operacion && operacion >= propiedad && operacion >= cedula) return "operacion";
+  if (propiedad >= cedula && propiedad === mayor) return "propiedad";
+  return "cedula";
+}
+
+export function asignarLados(textos: string[], preferido = "") {
+  const puntajes = textos.map(puntajeLado);
+  const usados = new Set<Lado>();
+  const asignados: (Lado | "")[] = textos.map(() => "");
+  const orden = textos
+    .map((_, indice) => indice)
+    .sort((a, b) => Math.max(...LADOS.map((lado) => puntajes[b][lado])) - Math.max(...LADOS.map((lado) => puntajes[a][lado])));
+  for (const indice of orden) {
+    const mejor = LADOS.map((lado) => [lado, puntajes[indice][lado]] as const)
+      .filter((item) => item[1] >= 3 && !usados.has(item[0]))
+      .sort((a, b) => b[1] - a[1])[0];
+    if (!mejor) continue;
+    asignados[indice] = mejor[0];
+    usados.add(mejor[0]);
+  }
+  for (let indice = 0; indice < textos.length; indice++) {
+    if (asignados[indice]) continue;
+    const familia = familiaDe(puntajes[indice]);
+    const lado =
+      familia === "cedula"
+        ? usados.has("cedula_frente")
+          ? "cedula_reverso"
+          : "cedula_frente"
+        : familia === "propiedad"
+          ? usados.has("tarjeta_propiedad_frente")
+            ? "tarjeta_propiedad_reverso"
+            : "tarjeta_propiedad_frente"
+          : familia === "operacion"
+            ? "tarjeta_operacion"
+            : "";
+    if (lado && !usados.has(lado)) {
+      asignados[indice] = lado;
+      usados.add(lado);
+    }
+  }
+  if (textos.length === 1 && !asignados[0] && (LADOS as readonly string[]).includes(preferido)) asignados[0] = preferido as Lado;
+  return asignados;
+}

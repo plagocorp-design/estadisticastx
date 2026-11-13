@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
@@ -11,6 +11,22 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
+
+function cargarEnvLocal() {
+  try {
+    const crudo = readFileSync(new URL("./.env", import.meta.url), "utf8");
+    for (const linea of crudo.split("\n")) {
+      const corte = linea.indexOf("=");
+      if (corte < 1 || linea.startsWith("#")) continue;
+      const clave = linea.slice(0, corte);
+      if (process.env[clave]) continue;
+      process.env[clave] = linea.slice(corte + 1).replace(/^"|"$/g, "").replace(/\\n/g, "\n");
+    }
+  } catch {
+    /* sin archivo local, las claves vienen del servidor */
+  }
+}
+cargarEnvLocal();
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
