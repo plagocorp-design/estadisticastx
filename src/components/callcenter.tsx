@@ -42,7 +42,6 @@ import {
   type EfectividadFila,
   type PlacaDeBase,
   type CorteCall,
-  type ProcesoStat,
 } from "@/lib/callcenter.functions";
 import type { Me } from "@/lib/casos.functions";
 import { hoyBogota, ORIGENES } from "@/lib/casos";
@@ -971,170 +970,352 @@ function PlacasBase({ placas, campana, mes, onProceso }: { placas: PlacaDeBase[]
   );
 }
 
-function Barras({ titulo, nota, filas }: { titulo: string; nota?: string; filas: { nombre: string; valor: number; extra?: string }[] }) {
-  const tope = Math.max(1, ...filas.map((fila) => fila.valor));
+function Panel({ titulo, nota, abierto = false, children }: { titulo: string; nota?: string; abierto?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(abierto);
   return (
-    <section className="rounded-card border border-line bg-card p-4">
-      <p className="font-semibold text-navy">{titulo}</p>
-      {nota ? <p className="mt-1 text-xs text-ink-soft">{nota}</p> : null}
-      <ul className="mt-3 grid gap-2">
-        {filas.length === 0 ? <li className="text-sm text-ink-soft">Sin datos en este mes.</li> : null}
-        {filas.slice(0, 8).map((fila) => (
-          <li key={fila.nombre}>
-            <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="min-w-0 truncate">{fila.nombre}</span>
-              <span className="shrink-0 font-semibold tabular-nums">{fila.extra || fila.valor}</span>
-            </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full bg-paper">
-              <div className="h-full rounded-full bg-navy" style={{ width: `${Math.max(fila.valor ? 6 : 0, Math.round((fila.valor / tope) * 100))}%` }} />
-            </div>
-          </li>
-        ))}
-      </ul>
+    <section className="rounded-card border border-line bg-card">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left">
+        <span>
+          <span className="block font-semibold text-navy">{titulo}</span>
+          {nota ? <span className="mt-1 block text-xs text-ink-soft">{nota}</span> : null}
+        </span>
+        <span className="shrink-0 text-sm font-semibold text-navy">{open ? "Plegar" : "Ver"}</span>
+      </button>
+      {open ? <div className="border-t border-line px-4 py-3">{children}</div> : null}
     </section>
   );
+}
+
+function FiltroSelect({ label, value, opciones, todos = "Todos", onChange }: { label: string; value: string; opciones: string[]; todos?: string; onChange: (v: string) => void }) {
+  return (
+    <label className="text-xs font-semibold">
+      {label}
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-line bg-card px-3 text-sm font-normal">
+        <option value="">{todos}</option>
+        {opciones.map((op) => <option key={op} value={op}>{op}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function GraficoBarras({ datos }: { datos: { nombre: string; valor: number }[] }) {
+  if (datos.length === 0) return <p className="text-sm text-ink-soft">Sin datos con ese filtro.</p>;
+  return (
+    <div style={{ height: Math.max(220, datos.length * 32) }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={datos} layout="vertical" margin={{ left: 8, right: 12, top: 8, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+          <XAxis type="number" allowDecimals={false} />
+          <YAxis type="category" dataKey="nombre" width={128} tick={{ fontSize: 11 }} />
+          <Tooltip />
+          <Bar dataKey="valor" name="Llamadas" fill="#1b3a4b" radius={4} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function vaciaEfecto(nombre: string): EfectividadFila {
+  return { nombre, contesto: 0, noInteresado: 0, considera: 0, quiere: 0, enProceso: 0, noAfiliado: 0, noLocalizado: 0, afiliado: 0, procesosAbiertos: 0, vinculados: 0 };
+}
+
+function efectoDe(row: CorteCall, fila: EfectividadFila) {
+  const inten = row.intencion.toLowerCase();
+  const res = row.resultado.toLowerCase();
+  fila.contesto += row.efectivos;
+  if (inten.includes("no interesado")) fila.noInteresado += row.total;
+  if (inten.includes("considera")) fila.considera += row.total;
+  if (inten.includes("quiere")) fila.quiere += row.total;
+  if (res.includes("en proceso")) fila.enProceso += row.total;
+  if (res.includes("no afiliado")) fila.noAfiliado += row.total;
+  else if (res.includes("afiliado")) fila.afiliado += row.total;
+  if (res.includes("no localizado")) fila.noLocalizado += row.total;
+}
+
+function bajarCsv(nombre: string, filas: string[][]) {
+  const texto = filas.map((fila) => fila.map((celda) => `"${String(celda ?? "").replaceAll('"', '""')}"`).join(";")).join("\n");
+  const blob = new Blob(["\uFEFF" + texto], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+  enlace.href = url;
+  enlace.download = nombre;
+  enlace.click();
+  URL.revokeObjectURL(url);
 }
 
 function Estadisticas({ onError, onProceso }: { onError: (t: string) => void; onProceso: (id: number) => void }) {
   const hoy = hoyBogota();
   const [mes, setMes] = useState(hoy.slice(0, 7));
+  const [asesor, setAsesor] = useState("");
+  const [empresa, setEmpresa] = useState("");
+  const [clasificacion, setClasificacion] = useState("");
+  const [calificacion, setCalificacion] = useState("");
+  const [intencion, setIntencion] = useState("");
+  const [resultado, setResultado] = useState("");
   const [dia, setDia] = useState(hoy);
   const [stats, setStats] = useState<StatsCall | null>(null);
-  const [campana, setCampana] = useState(true);
+  const [exportando, setExportando] = useState(false);
   function cargar(diaSel = dia) {
     statsCall({ data: { dia: diaSel } }).then(setStats).catch((err: Error) => onError(err.message));
   }
   useEffect(() => { cargar(); }, []);
-  const meses = (stats?.meses ?? []).filter((item) => /^\d{4}-\d{2}$/.test(item.mes));
-  const vista = meses.find((item) => item.mes === mes) ?? meses[meses.length - 1];
-  const efectividad = sumarEfectividad(campana ? (stats?.meses ?? []) : vista ? [vista] : []);
-  const nombres = [...new Set(meses.flatMap((item) => item.porAsesor.map((row) => row.nombre)))];
-  nombres.sort((a, b) => {
-    const total = (nombre: string) => meses.reduce((suma, item) => suma + (item.porAsesor.find((row) => row.nombre === nombre)?.total ?? 0), 0);
-    return total(b) - total(a);
+
+  const todos = stats?.cortes ?? [];
+  function pasa(row: CorteCall, salvo = "") {
+    if (salvo !== "mes" && mes !== "todos" && !row.fecha.startsWith(mes)) return false;
+    if (salvo !== "asesor" && asesor && row.asesor !== asesor) return false;
+    if (salvo !== "empresa" && empresa && row.empresa !== empresa) return false;
+    if (salvo !== "clasificacion" && clasificacion && row.clasificacion !== clasificacion) return false;
+    if (salvo !== "calificacion" && calificacion && row.calificacion !== calificacion) return false;
+    if (salvo !== "intencion" && intencion && row.intencion !== intencion) return false;
+    if (salvo !== "resultado" && resultado && row.resultado !== resultado) return false;
+    return true;
+  }
+  function unicos(campo: keyof CorteCall, salvo: string) {
+    return [...new Set(todos.filter((row) => pasa(row, salvo)).map((row) => String(row[campo] || "")))].filter(Boolean).sort((a, b) => a.localeCompare(b, "es"));
+  }
+  const mesesOpcion = useMemo(
+    () => [...new Set(todos.map((row) => row.fecha.slice(0, 7)).filter((item) => /^\d{4}-\d{2}$/.test(item)))].sort(),
+    [todos],
+  );
+  const cortes = todos.filter((row) => pasa(row));
+  const llamadas = cortes.reduce((n, row) => n + row.total, 0);
+  const efectivas = cortes.reduce((n, row) => n + row.efectivos, 0);
+  const noEfectivas = cortes.reduce((n, row) => n + row.noEfectivos, 0);
+  const segundos = cortes.reduce((n, row) => n + row.segundos, 0);
+  const tasa = llamadas ? Math.round((efectivas / llamadas) * 100) : 0;
+  const porAsesor = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const row of cortes) mapa.set(row.asesor, (mapa.get(row.asesor) || 0) + row.total);
+    return [...mapa.entries()].map(([nombre, valor]) => ({ nombre, valor })).sort((a, b) => b.valor - a.valor);
+  }, [cortes]);
+  const porEmpresa = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const row of cortes) mapa.set(row.empresa, (mapa.get(row.empresa) || 0) + row.total);
+    return [...mapa.entries()].map(([nombre, valor]) => ({ nombre, valor })).sort((a, b) => b.valor - a.valor).slice(0, 12);
+  }, [cortes]);
+  const porCalificacion = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const row of cortes) mapa.set(row.calificacion, (mapa.get(row.calificacion) || 0) + row.total);
+    return [...mapa.entries()].map(([nombre, valor]) => ({ nombre, valor })).sort((a, b) => b.valor - a.valor);
+  }, [cortes]);
+  const porIntencion = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const row of cortes) mapa.set(row.intencion, (mapa.get(row.intencion) || 0) + row.total);
+    return [...mapa.entries()].map(([nombre, valor]) => ({ nombre, valor })).sort((a, b) => b.valor - a.valor);
+  }, [cortes]);
+  const porResultado = useMemo(() => {
+    const mapa = new Map<string, number>();
+    for (const row of cortes) mapa.set(row.resultado, (mapa.get(row.resultado) || 0) + row.total);
+    return [...mapa.entries()].map(([nombre, valor]) => ({ nombre, valor })).sort((a, b) => b.valor - a.valor);
+  }, [cortes]);
+  const porDia = useMemo(() => {
+    const mapa = new Map<string, { fecha: string; llamadas: number; efectivas: number }>();
+    for (const row of cortes) {
+      const actual = mapa.get(row.fecha) ?? { fecha: row.fecha.slice(5), llamadas: 0, efectivas: 0 };
+      actual.llamadas += row.total;
+      actual.efectivas += row.efectivos;
+      mapa.set(row.fecha, actual);
+    }
+    return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, fila]) => fila);
+  }, [cortes]);
+  const efectividad = useMemo(() => {
+    const mapa = new Map<string, EfectividadFila>();
+    const tomar = (nombre: string) => {
+      const actual = mapa.get(nombre) ?? vaciaEfecto(nombre);
+      mapa.set(nombre, actual);
+      return actual;
+    };
+    for (const row of cortes) efectoDe(row, tomar(row.asesor));
+    for (const row of stats?.procesos ?? []) {
+      if (mes !== "todos" && row.mes !== mes) continue;
+      if (asesor && row.nombre !== asesor) continue;
+      if (empresa && row.empresa !== empresa) continue;
+      const fila = tomar(row.nombre);
+      fila.procesosAbiertos += row.abiertos;
+      fila.vinculados += row.vinculados;
+    }
+    return [...mapa.values()].sort((a, b) => b.contesto - a.contesto || b.vinculados - a.vinculados);
+  }, [cortes, stats?.procesos, mes, asesor, empresa]);
+  const placas = (stats?.placas ?? []).filter((fila) => {
+    if (mes !== "todos" && fila.fecha.slice(0, 7) !== mes) return false;
+    if (asesor && fila.asesor !== asesor) return false;
+    if (empresa && fila.empresa !== empresa) return false;
+    return true;
   });
-  const granTotal = meses.reduce((suma, item) => suma + item.total, 0);
-  const tasa = vista && vista.total ? Math.round((vista.efectivos / vista.total) * 100) : 0;
+  const minutos = (stats?.minutos ?? []).filter((row) => {
+    if (asesor && row.asesor !== asesor) return false;
+    if (empresa && row.empresa !== empresa) return false;
+    if (clasificacion && row.clasificacion !== clasificacion) return false;
+    return true;
+  });
+  const hayFiltro = mes !== "todos" || Boolean(asesor || empresa || clasificacion || calificacion || intencion || resultado);
+
+  function limpiar() {
+    setMes("todos");
+    setAsesor("");
+    setEmpresa("");
+    setClasificacion("");
+    setCalificacion("");
+    setIntencion("");
+    setResultado("");
+  }
+
+  function informe() {
+    const desde = mes === "todos" ? `${mesesOpcion[0] || hoy.slice(0, 7)}-01` : `${mes}-01`;
+    const hasta = mes === "todos" || mes === hoy.slice(0, 7) ? hoy : finDeMes(mes);
+    setExportando(true);
+    exportarCall({ data: { desde, hasta, asesor, empresa, clasificacion, calificacion, intencion, resultado } })
+      .then((file) => bajarExcel(file.base64, file.filename))
+      .catch((err: Error) => onError(err.message))
+      .finally(() => setExportando(false));
+  }
+
+  function resumenCsv() {
+    const filas: string[][] = [
+      ["Corte", mes === "todos" ? "Todos los meses" : tituloMes(mes)],
+      ["Asesor", asesor || "Todos"],
+      ["Empresa", empresa || "Todas"],
+      ["Clasificación", clasificacion || "Todas"],
+      ["Calificación", calificacion || "Todas"],
+      ["Intención", intencion || "Todas"],
+      ["Resultado", resultado || "Todos"],
+      [],
+      ["Llamadas", String(llamadas)],
+      ["Contacto efectivo", String(efectivas)],
+      ["No efectivo", String(noEfectivas)],
+      ["Contactabilidad", `${tasa}%`],
+      [],
+      ["Asesor", ...COLUMNAS_EFECTO.map((col) => col.label)],
+      ...efectividad.map((fila) => [fila.nombre, ...COLUMNAS_EFECTO.map((col) => String(fila[col.clave]))]),
+      [],
+      ["Día", "Llamadas", "Efectivas"],
+      ...porDia.map((fila) => [fila.fecha, String(fila.llamadas), String(fila.efectivas)]),
+    ];
+    bajarCsv(`informe-llamadas-${mes}.csv`, filas);
+  }
+
   return (
-    <div>
+    <div className="grid gap-3">
       <CargarGestiones onError={onError} onListo={() => cargar(dia)} />
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-ink-soft">Solo las llamadas tipificadas en la hoja BD. El WhatsApp no suma. Si ya está la base completa o la de gestión, la placa tiene que existir ahí. {granTotal} en total. El 0:00 es porque el Excel no trae duración: el tiempo solo se cuenta en las llamadas hechas desde la app.</p>
-        <button type="button" className="h-10 rounded-2xl border border-line bg-card px-4 text-sm font-semibold" disabled={!vista && !campana} onClick={() => {
-          const desde = campana && meses[0] ? `${meses[0].mes}-01` : vista ? `${vista.mes}-01` : `${hoy.slice(0, 7)}-01`;
-          const hasta = campana || !vista ? hoy : vista.mes === hoy.slice(0, 7) ? hoy : finDeMes(vista.mes);
-          exportarCall({ data: { desde, hasta } }).then((file) => bajarExcel(file.base64, file.filename)).catch((err: Error) => onError(err.message));
-        }}>{campana ? "Exportar campaña" : `Exportar ${vista ? tituloMes(vista.mes) : "Excel"}`}</button>
-      </div>
-      <div className="mt-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="font-semibold text-navy">Efectividad por asesor</p>
-          <button type="button" onClick={() => setCampana((v) => !v)} className="h-10 rounded-2xl border border-line bg-card px-4 text-sm font-semibold">
-            {campana ? `Ver ${vista ? tituloMes(vista.mes) : "el mes"}` : "Ver toda la campaña"}
-          </button>
+      <div className="rounded-card border border-line bg-card p-4">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <p className="font-semibold text-navy">Filtros</p>
+            <p className="mt-1 text-xs text-ink-soft">Lo que elijas corta las gráficas, la tabla y el informe. El WhatsApp no entra. Si ya está la base, la placa tiene que existir ahí.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={limpiar} className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold">Limpiar</button>
+            <button type="button" onClick={resumenCsv} disabled={!stats} className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold">Resumen CSV</button>
+            <button type="button" onClick={informe} disabled={exportando || !stats} className="h-10 rounded-2xl bg-navy px-3 text-sm font-semibold text-paper disabled:opacity-60">{exportando ? "Armando…" : "Informe Excel"}</button>
+          </div>
         </div>
-        <p className="mt-1 text-sm text-ink-soft">
-          La misma tabla de la hoja de coordinación. Contestó es contacto efectivo. No interesado, considera opción y quiere afiliarse salen de la intención. En proceso, no afiliado, no localizado y afiliado salen del resultado. Abiertos y vinculados de la base son procesos cuya placa está en la base de llamadas, aunque los hayan abierto en Nuevo seguimiento. El asesor es quien tiene el proceso. Vinculado es el que ya se completó o ya entregó la tarjeta.
-        </p>
-        <TablaEfectividad filas={efectividad} />
-        <PlacasBase placas={stats?.placas ?? []} campana={campana} mes={vista?.mes ?? mes} onProceso={onProceso} />
-      </div>
-      {meses.length > 0 ? (
-        <div className="mt-3 overflow-x-auto rounded-card border border-line bg-card">
-          <table className="w-full min-w-[32rem] text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-xs text-ink-soft">
-                <th className="px-3 py-2 font-semibold">Asesor</th>
-                {meses.map((item) => (
-                  <th key={item.mes} className="px-3 py-2 font-semibold">{tituloMes(item.mes)}</th>
-                ))}
-                <th className="px-3 py-2 font-semibold">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {nombres.map((nombre) => {
-                const total = meses.reduce((suma, item) => suma + (item.porAsesor.find((row) => row.nombre === nombre)?.total ?? 0), 0);
-                return (
-                  <tr key={nombre} className="border-b border-line last:border-0">
-                    <td className="px-3 py-2 font-semibold">{nombre}</td>
-                    {meses.map((item) => (
-                      <td key={item.mes} className="px-3 py-2">{item.porAsesor.find((row) => row.nombre === nombre)?.total ?? 0}</td>
-                    ))}
-                    <td className="px-3 py-2 font-semibold">{total}</td>
-                  </tr>
-                );
-              })}
-              <tr>
-                <td className="px-3 py-2 font-semibold">Total</td>
-                {meses.map((item) => (
-                  <td key={item.mes} className="px-3 py-2 font-semibold">{item.total}</td>
-                ))}
-                <td className="px-3 py-2 font-semibold">{granTotal}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="text-xs font-semibold">
+            Mes
+            <select value={mes === "todos" ? "" : mes} onChange={(e) => setMes(e.target.value || "todos")} className="mt-1 h-11 w-full rounded-2xl border border-line bg-card px-3 text-sm font-normal">
+              <option value="">Todos los meses</option>
+              {mesesOpcion.map((item) => <option key={item} value={item}>{tituloMes(item)}</option>)}
+            </select>
+          </label>
+          <FiltroSelect label="Asesor" value={asesor} opciones={unicos("asesor", "asesor")} onChange={setAsesor} />
+          <FiltroSelect label="Empresa" value={empresa} opciones={unicos("empresa", "empresa")} onChange={setEmpresa} />
+          <FiltroSelect label="Clasificación" value={clasificacion} opciones={unicos("clasificacion", "clasificacion")} onChange={setClasificacion} />
+          <FiltroSelect label="Calificación" value={calificacion} opciones={unicos("calificacion", "calificacion")} onChange={setCalificacion} />
+          <FiltroSelect label="Intención" value={intencion} opciones={unicos("intencion", "intencion")} onChange={setIntencion} />
+          <FiltroSelect label="Resultado" value={resultado} opciones={unicos("resultado", "resultado")} onChange={setResultado} />
         </div>
-      ) : stats ? <p className="mt-3 text-sm text-ink-soft">Todavía no hay llamadas guardadas.</p> : <p className="mt-3 text-sm text-ink-soft">Cargando…</p>}
-      {vista ? (
-        <>
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            {meses.map((item) => (
-              <button key={item.mes} type="button" onClick={() => setMes(item.mes)} className={"h-10 shrink-0 rounded-2xl px-4 text-sm font-semibold " + (item.mes === vista.mes ? "bg-navy text-paper" : "border border-line bg-card")}>
-                {tituloMes(item.mes)} · {item.total}
+        {mesesOpcion.length > 0 ? (
+          <div className="mt-3 flex gap-2 overflow-x-auto">
+            <button type="button" onClick={() => setMes("todos")} className={"h-9 shrink-0 rounded-full px-3 text-sm font-semibold " + (mes === "todos" ? "bg-navy text-paper" : "border border-line bg-paper")}>Todos</button>
+            {mesesOpcion.map((item) => (
+              <button key={item} type="button" onClick={() => setMes(item)} className={"h-9 shrink-0 rounded-full px-3 text-sm font-semibold " + (mes === item ? "bg-navy text-paper" : "border border-line bg-paper")}>
+                {tituloMes(item)}
               </button>
             ))}
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Dato n={vista.total} label="Llamadas" />
-            <Dato n={vista.efectivos} label="Contacto efectivo" />
-            <Dato n={vista.noEfectivos} label="No efectivo" />
-            <Dato n={`${tasa}%`} label="Contactabilidad" />
+        ) : null}
+      </div>
+
+      {!stats ? <p className="text-sm text-ink-soft">Cargando…</p> : null}
+      {stats && cortes.length === 0 ? <p className="text-sm text-ink-soft">{hayFiltro ? "Nada coincide con ese filtro." : "Todavía no hay llamadas guardadas."}</p> : null}
+
+      <Panel titulo="Resumen" nota={`${llamadas} llamadas · ${efectivas} efectivas · ${tasa}% de contactabilidad · ${duracionTexto(segundos)}.`} abierto>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Dato n={llamadas} label="Llamadas" />
+          <Dato n={efectivas} label="Contacto efectivo" />
+          <Dato n={noEfectivas} label="No efectivo" />
+          <Dato n={`${tasa}%`} label="Contactabilidad" />
+        </div>
+        {porDia.length > 0 ? (
+          <div className="mt-4 h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={porDia} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="fecha" tick={{ fontSize: 11 }} />
+                <YAxis allowDecimals={false} width={32} />
+                <Tooltip />
+                <Line type="monotone" dataKey="llamadas" name="Llamadas" stroke="#1b3a4b" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="efectivas" name="Efectivas" stroke="#65a30d" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-          <Bloque titulo={`Por asesor · ${tituloMes(vista.mes)}`}>
-            {vista.porAsesor.map((row) => <p key={row.nombre}>{row.nombre}: {row.total} · {row.efectivos} efectivas · {duracionTexto(row.segundos)}</p>)}
-          </Bloque>
-          <Bloque titulo="Por empresa">
-            {vista.porEmpresa.map((row) => <p key={row.empresa}>{row.empresa}: {row.total} · {row.efectivos} efectivas</p>)}
-          </Bloque>
-          <Bloque titulo="Por calificación">
-            {vista.porCalificacion.map((row) => <p key={row.calificacion + row.clasificacion}>{row.calificacion} · {row.clasificacion || "sin clasificación"}: {row.total}</p>)}
-          </Bloque>
-          <Bloque titulo="Por día">
-            {vista.porDia.map((row) => <p key={row.fecha}>{row.fecha}: {row.total} · {row.efectivos} efectivas</p>)}
-          </Bloque>
-          <div className="mt-3">
-            <label className="text-sm font-semibold">Minuto a minuto
-              <input type="date" value={dia} onChange={(e) => { setDia(e.target.value); cargar(e.target.value); }} className="mt-1 h-11 w-full rounded-2xl border border-line px-3 font-normal" />
-            </label>
-            <ul className="mt-2 grid gap-1">
-              {stats?.minutos.map((row, i) => (
-                <li key={`${row.hora}-${i}`} className="rounded-xl bg-card px-3 py-2 text-sm">
-                  <b>{row.hora || "—"}</b> {row.asesor.split(" ")[0]} · {row.placa} {row.nombre} · {row.clasificacion} · {duracionTexto(row.segundos)}
-                </li>
-              ))}
-              {stats && stats.minutos.length === 0 ? <li className="text-sm text-ink-soft">Ese día no hay llamadas guardadas en el call center.</li> : null}
-            </ul>
-          </div>
-        </>
-      ) : null}
+        ) : null}
+      </Panel>
+
+      <Panel titulo="Efectividad por asesor" nota="Contestó es contacto efectivo. Lo demás sale de la intención y del resultado. Abiertos y vinculados son procesos de la base, filtrados por mes, asesor y empresa." abierto>
+        <TablaEfectividad filas={efectividad} />
+      </Panel>
+
+      <Panel titulo="Por asesor" nota="Cada barra es el número de llamadas de ese corte.">
+        <GraficoBarras datos={porAsesor} />
+      </Panel>
+      <Panel titulo="Por empresa" nota="Las 12 empresas con más llamadas en este corte.">
+        <GraficoBarras datos={porEmpresa} />
+      </Panel>
+      <Panel titulo="Por calificación">
+        <GraficoBarras datos={porCalificacion} />
+      </Panel>
+      <Panel titulo="Por intención">
+        <GraficoBarras datos={porIntencion} />
+      </Panel>
+      <Panel titulo="Por resultado">
+        <GraficoBarras datos={porResultado} />
+      </Panel>
+      <Panel titulo="Por día" nota="Sirve para ver en qué fechas se movió la campaña.">
+        {porDia.length === 0 ? <p className="text-sm text-ink-soft">Sin días en este corte.</p> : (
+          <ul className="grid max-h-80 gap-1 overflow-auto text-sm">
+            {porDia.map((fila) => <li key={fila.fecha} className="flex justify-between gap-3"><span>{fila.fecha}</span><span className="tabular-nums">{fila.llamadas} · {fila.efectivas} efectivas</span></li>)}
+          </ul>
+        )}
+      </Panel>
+
+      <Panel titulo="Procesos que salieron de la llamada" nota="También respetan mes, asesor y empresa.">
+        <PlacasBase placas={placas} campana mes={mes === "todos" ? hoy.slice(0, 7) : mes} onProceso={onProceso} />
+      </Panel>
+
+      <Panel titulo="Minuto a minuto" nota="Es un solo día. Asesor, empresa y clasificación sí lo cortan. El 0:00 es porque el Excel no trae duración.">
+        <label className="text-sm font-semibold">Día
+          <input type="date" value={dia} onChange={(e) => { setDia(e.target.value); cargar(e.target.value); }} className="mt-1 h-11 w-full rounded-2xl border border-line px-3 font-normal" />
+        </label>
+        <ul className="mt-2 grid max-h-80 gap-1 overflow-auto">
+          {minutos.map((row, i) => (
+            <li key={`${row.hora}-${row.placa}-${i}`} className="rounded-xl bg-paper px-3 py-2 text-sm">
+              <b>{row.hora || "—"}</b> {row.asesor.split(" ")[0]} · {row.placa} {row.nombre} · {row.empresa} · {row.clasificacion} · {duracionTexto(row.segundos)}
+            </li>
+          ))}
+          {stats && minutos.length === 0 ? <li className="text-sm text-ink-soft">Ese día no hay llamadas con este filtro.</li> : null}
+        </ul>
+      </Panel>
     </div>
   );
 }
 
 function Dato({ n, label }: { n: number | string; label: string }) {
   return (
-    <div className="rounded-card border border-line bg-card p-3">
+    <div className="rounded-2xl border border-line bg-paper p-3">
       <p className="text-2xl font-semibold text-navy">{n}</p>
       <p className="text-xs text-ink-soft">{label}</p>
-    </div>
-  );
-}
-
-function Bloque({ titulo, children }: { titulo: string; children: ReactNode }) {
-  return (
-    <div className="mt-3 rounded-card border border-line bg-card p-4 text-sm">
-      <p className="mb-2 font-semibold text-navy">{titulo}</p>
-      <div className="grid gap-1">{children}</div>
     </div>
   );
 }
