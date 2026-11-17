@@ -6,6 +6,10 @@ export async function paginasDe(file: File) {
     if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|heic|bmp)$/i.test(file.name)) {
       throw new Error("Sube una foto o un PDF");
     }
+    if (file.size <= 1_400_000 && /image\/(jpeg|jpg|png|webp)/i.test(file.type || "")) {
+      const base = file.name.replace(/\.[^.]+$/, "") || "foto";
+      return { paginas: [{ nombre: `${base}.jpg`, archivo: await leerBase64(file) }], sobraron: 0 };
+    }
     const lista = await prepararParaLeer(file);
     return { paginas: [lista], sobraron: 0 };
   }
@@ -20,7 +24,7 @@ export async function paginasDe(file: File) {
   for (let numero = 1; numero <= total; numero++) {
     const hoja = await doc.getPage(numero);
     const natural = hoja.getViewport({ scale: 1 });
-    const vista = hoja.getViewport({ scale: Math.min(2, 1600 / natural.width) });
+    const vista = hoja.getViewport({ scale: Math.min(2.4, 2000 / natural.width) });
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.floor(vista.width));
     canvas.height = Math.max(1, Math.floor(vista.height));
@@ -29,7 +33,7 @@ export async function paginasDe(file: File) {
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await hoja.render({ canvasContext: ctx, viewport: vista }).promise;
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((item) => resolve(item), "image/jpeg", 0.82));
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((item) => resolve(item), "image/jpeg", 0.92));
     if (!blob) throw new Error("No pude leer una página del PDF");
     paginas.push({ nombre: `${base}-p${numero}.jpg`, archivo: await leerBase64(blob) });
   }

@@ -24,6 +24,7 @@ function estadoDe(descripcion: string) {
   if (bajo.includes("radic")) return "Radicada";
   if (bajo.includes("exped")) return "Expedida";
   if (bajo.includes("impres")) return "Impresa";
+  if (bajo.includes("empresa")) return "En la empresa";
   if (bajo.includes("proceso") || bajo.includes("tramite") || bajo.includes("trámite")) return "En trámite";
   return descripcion;
 }
@@ -71,4 +72,37 @@ export const consultarTarjeta = createServerFn({ method: "POST" })
     const codigo = textoPlano(json.estadoblo);
     const bloqueo = codigo ? textoPlano(json.bloqueo) : "";
     return { ok: Boolean(detalle), estado: estadoDe(detalle), detalle: detalle || "Sin estado", bloqueo };
+  });
+
+export const aplicarIntranet = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: number; estado: string }) => input)
+  .handler(async ({ data }) => {
+    const estado = data.estado;
+    const tarjeta =
+      estado === "Entregada" || estado === "Expedida" || estado === "Impresa" || estado === "En la empresa"
+        ? "Expedida"
+        : estado === "Radicada" || estado === "En movilidad" || estado === "En VUS"
+          ? "Radicada"
+          : estado === "En trámite"
+            ? "Pendiente"
+            : "";
+    if (!tarjeta) return { ok: false };
+    const op =
+      estado === "Entregada"
+        ? "entregada"
+        : estado === "Expedida" || estado === "Impresa" || estado === "En la empresa"
+          ? "expedida"
+          : estado === "En movilidad" || estado === "En VUS"
+            ? "movilidad"
+            : estado === "Radicada"
+              ? "radicada"
+              : "pagada";
+    const { getSql } = await import("@/lib/db");
+    const sql = await getSql();
+    await sql.query(
+      `update casos set estado_tarjeta = $1, tarjeta_entregada = $2, op_tarjeta = $3, updated_at = now() where id = $4`,
+      [tarjeta, estado === "Entregada", op, data.id],
+    );
+    return { ok: true, estadoTarjeta: tarjeta, opTarjeta: op, tarjetaEntregada: estado === "Entregada" };
   });

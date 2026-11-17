@@ -1,5 +1,7 @@
 import { hoyBogota } from "@/lib/casos";
 import { contratoDesdeTexto } from "@/lib/contrato";
+import { acercar, CARROCERIAS, CLASES, COMBUSTIBLES, LINEAS, MARCAS, SERVICIOS } from "@/lib/vehiculos";
+import { EMPRESAS, acercarEmpresa, unificarEmpresa } from "@/lib/empresas";
 
 export type CampoLeido = {
   key:
@@ -30,6 +32,8 @@ export type LecturaDoc = {
   vence: string;
   aviso: string;
   campos: CampoLeido[];
+  datos?: Partial<Record<CampoLeido["key"], string>>;
+  extra?: Record<string, string>;
 };
 
 const ETIQUETAS: Record<CampoLeido["key"], string> = {
@@ -123,7 +127,7 @@ function placaDe(texto: string) {
 
 function numeroCc(crudo: string) {
   const n = crudo.replace(/\D/g, "");
-  if (n.length < 6 || n.length > 11 || n.startsWith("3")) return "";
+  if (n.length < 6 || n.length > 10 || n.startsWith("3")) return "";
   return n;
 }
 
@@ -174,7 +178,7 @@ function lineaNombre(linea: string) {
   const t = linea.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑ\s]/g, " ").replace(/\s+/g, " ").trim();
   if (t.length < 3) return "";
   if (/^(APELLIDOS?|NOMBRES?|NACIONALIDAD|ESTATURA|SEXO|FECHA|LUGAR|NUIP|FIRMA|NUMERO|SEDE)\b/.test(t)) return "";
-  if (/PROPIETARIO|APELLIDO|IDENTIFIC/.test(t)) return "";
+  if (/PROPIETARIO|APELLIDO|IDENTIFIC|LICENCIA|TRANSITO|TARJETA|PROPIEDAD|REPUBLICA|COLOMBIA|MINISTERIO|VEHICULO|COMBUSTIBLE|CAPACIDAD|CHASIS|CILINDRAJE/.test(t)) return "";
   if (/REPUBLICA|COLOMBIA|CIUDADANIA|TRANSITO|REGISTRADOR/.test(t)) return "";
   return t;
 }
@@ -242,6 +246,7 @@ function propietarioDe(texto: string) {
   for (const linea of texto.slice(marca.index).split(/\n/).slice(0, 5)) {
     if (/PROPIETARIO|APELLIDO/i.test(linea)) continue;
     let t = linea.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑ\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (/LICENCIA|TRANSITO|TARJETA|PROPIEDAD|REPUBLICA|COLOMBIA|MINISTERIO|VEHICULO|COMBUSTIBLE|CAPACIDAD|CHASIS|CILINDRAJE|PLACA|MARCA|MODELO/.test(t)) continue;
     t = t.replace(/\b(CC|IDENTIFICACION)\b.*$/, "").replace(/\s+Y\s*$/, "").trim();
     const palabras = t.split(" ").filter((parte) => parte.length > 1 && parte !== "CC");
     if (palabras.length >= 2) return palabras.join(" ");
@@ -258,10 +263,26 @@ function nombreDe(texto: string) {
 }
 
 function pieza(texto: string, etiqueta: RegExp, max = 28) {
-  const valor = valorDe(texto, etiqueta, max).replace(/\s+/g, " ").trim();
-  if (valor.length < 2) return "";
-  if (/^(de|del|la|el|no|nro|numero)$/i.test(valor)) return "";
-  return valor.toUpperCase().slice(0, max);
+  const lineas = texto.split(/\n/).map((linea) => linea.trim()).filter(Boolean);
+  const ruido = /^(de|del|la|el|no|nro|numero|n[uú]mero|placa|marca|l[ií]nea|modelo|clase|servicio|color|tipo)$/i;
+  for (let i = 0; i < lineas.length; i += 1) {
+    const marca = lineas[i].match(etiqueta);
+    if (!marca || marca.index == null) continue;
+    const resto = lineas[i].slice(marca.index + marca[0].length).replace(/^[\s:.\-#]+/, "").trim();
+    if (resto.length >= 2 && !ruido.test(resto)) return resto.toUpperCase().slice(0, max);
+    for (const siguiente of lineas.slice(i + 1, i + 3)) {
+      if (ruido.test(siguiente) || etiqueta.test(siguiente)) continue;
+      if (siguiente.length >= 2) return siguiente.toUpperCase().slice(0, max);
+    }
+  }
+  return "";
+}
+
+function codigoDe(texto: string, etiqueta: RegExp) {
+  const zona = pieza(texto, etiqueta, 28);
+  const codigo = zona.toUpperCase().match(/[A-Z0-9][A-Z0-9\-]{5,22}/)?.[0] ?? "";
+  if (codigo && !/^(19|20)\d{2}$/.test(codigo)) return codigo;
+  return "";
 }
 
 function capacidadDe(texto: string) {
@@ -278,6 +299,350 @@ function empresaDe(texto: string) {
   const hallada = valorDe(texto, /(?:raz[oó]n social|empresa(?:\s+de\s+transporte|\s+afiliadora)?)\b/i, 80);
   if (hallada.length < 3) return "";
   return hallada.replace(/\b(nit|placa|n[uú]mero).*/i, "").trim().toUpperCase();
+}
+
+function saltarEtiqueta(linea: string) {
+  const t = linea.replace(/^[\s:.\-#/°º]+/, "").trim();
+  if (t.length < 2) return true;
+  return /^(de|del|la|el|no|nro|n[uú]mero|numero|n[°º]\.?|tipo|de vehiculo|del vehiculo)$/i.test(t);
+}
+
+function lineaSiguiente(lineas: string[], etiqueta: RegExp) {
+  for (let i = 0; i < lineas.length; i += 1) {
+    const marca = lineas[i].match(etiqueta);
+    if (!marca || marca.index == null) continue;
+    const resto = lineas[i].slice(marca.index + marca[0].length).replace(/^[\s:.\-#/°º]+/, "").trim();
+    if (resto.length >= 1 && !saltarEtiqueta(resto)) return resto;
+    for (let j = i + 1; j < Math.min(lineas.length, i + 5); j += 1) {
+      const siguiente = lineas[j].trim();
+      if (saltarEtiqueta(siguiente)) continue;
+      if (etiqueta.test(siguiente) && siguiente.length < 32) continue;
+      return siguiente;
+    }
+  }
+  return "";
+}
+
+function codigo(crudo: string) {
+  const compacto = crudo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (compacto.length >= 5 && compacto.length <= 22 && !/^(19|20)\d{2}$/.test(compacto) && !/^(MOTOR|CHASIS|SERIE|VIN|NUMERO)$/.test(compacto)) return compacto;
+  return "";
+}
+
+function placaLeida(crudo: string, texto: string) {
+  const compacto = crudo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const directa = compacto.match(/[A-Z]{3}\d{3}|[A-Z]{3}\d{2}[A-Z]/)?.[0] ?? "";
+  return directa || placaDe(texto);
+}
+
+function marcaEn(crudo: string, texto: string) {
+  const zona = acercar(crudo, MARCAS);
+  if (zona && MARCAS.includes(zona)) return zona;
+  const base = texto.toUpperCase();
+  return MARCAS.find((marca) => marca.length >= 3 && new RegExp(`\\b${marca}\\b`).test(base)) ?? (zona.length >= 3 ? zona : "");
+}
+
+function lineaEn(crudo: string, marca: string) {
+  const lista = marca && LINEAS[marca]?.length ? LINEAS[marca] : [...new Set(Object.values(LINEAS).flat())];
+  const limpia = crudo.toUpperCase().replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  if (!limpia || /MARCA|MODELO|CLASE|COMBUSTIBLE|CAPACIDAD|VEHICULO|CARROCER|CILINDR/.test(limpia)) return "";
+  const hit = [...lista]
+    .sort((a, b) => b.length - a.length)
+    .find((item) => {
+      const a = limpia.replace(/\s+/g, "");
+      const b = item.replace(/\s+/g, "");
+      return a.includes(b) || (a.length >= 4 && b.includes(a));
+    });
+  if (hit && limpia.replace(/\s+/g, "").startsWith(hit.replace(/\s+/g, "")) && limpia.length > hit.length + 1) return limpia.slice(0, 28);
+  return (hit || (/^[A-Z0-9][A-Z0-9 ]{1,26}$/.test(limpia) ? limpia : "")).slice(0, 28);
+}
+
+function claseEn(crudo: string) {
+  const t = crudo.toUpperCase();
+  if (/CAMIONETA/.test(t)) return "CAMIONETA";
+  if (/CAMPERO/.test(t)) return "CAMPERO";
+  if (/\bAUTO/.test(t)) return "AUTOMOVIL";
+  return "";
+}
+
+function carroceriaEn(crudo: string) {
+  const t = crudo.toUpperCase().replace(/\s+/g, "");
+  if (/HATCH/.test(t)) return "HATCHBACK";
+  if (/STATION|VAGON|WAGON/.test(t)) return "STATION WAGON";
+  if (/COUPE|CUP[EÉ]/.test(t)) return "COUPE";
+  if (/SEDAN|SEDÁN/.test(t)) return "SEDAN";
+  if (/\bVAN\b/.test(crudo.toUpperCase())) return "VAN";
+  if (/CAMIONETA/.test(t)) return "CAMIONETA";
+  return "";
+}
+
+function combustibleEn(crudo: string) {
+  const t = crudo.toUpperCase();
+  if (/EL[EÉ]CTR/.test(t)) return "ELECTRICO";
+  if (/H[IÍ]BRID/.test(t)) return "HIBRIDO";
+  if (/GASOLINA/.test(t) && /\bGAS\b/.test(t.replace("GASOLINA", ""))) return "GASOLINA Y GAS";
+  if (/DIESEL|ACPM/.test(t)) return "DIESEL";
+  if (/GAS NATURAL|\bGNV\b/.test(t)) return "GAS NATURAL";
+  if (/GASOLINA/.test(t)) return "GASOLINA";
+  return "";
+}
+
+function servicioEn(crudo: string) {
+  const t = crudo.toUpperCase();
+  if (/P[UÚ]BLIC|TAXI/.test(t)) return "PUBLICO";
+  if (/PARTICULAR/.test(t)) return "PARTICULAR";
+  if (/OFICIAL/.test(t)) return "OFICIAL";
+  if (/DIPLOM/.test(t)) return "DIPLOMATICO";
+  return "";
+}
+
+function motorValido(crudo: string) {
+  const c = crudo.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!/^[A-Z][A-Z0-9]{5,17}$/.test(c)) return "";
+  if (!/\d/.test(c)) return "";
+  if (/GASOLINA|DIESEL|PUBLICO|MARCA|MOTOR|CHASIS|SERIE|HATCH|AUTOMOVIL/.test(c)) return "";
+  return c;
+}
+
+function vinEn(texto: string) {
+  return texto.toUpperCase().match(/\b[A-HJ-NPR-Z0-9]{17}\b/)?.[0] ?? "";
+}
+
+function nitEn(texto: string) {
+  const marca = texto.match(/\bN\.?\s*I\.?\s*T\.?\b[^\d]{0,20}(\d{1,3}(?:[.\s]\d{3}){2}|\d{9,10})(?:\s*-\s*\d)?/i);
+  const n = (marca?.[1] ?? "").replace(/\D/g, "");
+  if (n.length === 9 || n.length === 10) return n;
+  return "";
+}
+
+const FILA_CAMPO: [string, RegExp][] = [
+  ["cilindraje", /cilindrad/i],
+  ["carroceria", /carrocer/i],
+  ["combustible", /combustible/i],
+  ["capacidad", /capacidad|pasajeros/i],
+  ["empresa", /raz[oó]n social/i],
+  ["propietario", /propietario/i],
+  ["cc", /identificaci[oó]n/i],
+  ["motor", /\bmotor\b/i],
+  ["chasis", /\bchasis\b/i],
+  ["serie", /\bserie\b/i],
+  ["servicio", /\bservicio\b/i],
+  ["modelo", /\bmodelo\b/i],
+  ["marca", /\bmarca\b/i],
+  ["linea", /\bl[ií]nea\b/i],
+  ["placa", /\bplaca\b/i],
+  ["clase", /\bclase\b/i],
+  ["color", /\bcolor\b/i],
+  ["vin", /\bvin\b/i],
+];
+
+function etiquetasDe(linea: string) {
+  return FILA_CAMPO.map(([key, regla]) => {
+    const m = linea.match(regla);
+    return m && m.index != null ? { key, index: m.index } : null;
+  })
+    .filter((item): item is { key: string; index: number } => Boolean(item))
+    .sort((a, b) => a.index - b.index)
+    .filter((item, i, lista) => lista.findIndex((otro) => otro.key === item.key) === i);
+}
+
+function esFilaDeTitulos(linea: string) {
+  const tags = etiquetasDe(linea);
+  if (!tags.length) return false;
+  const sobra = linea
+    .replace(/n[uú]mero de (motor|serie|chasis|vin)/gi, " ")
+    .replace(/clase de veh[ií]culo/gi, " ")
+    .replace(/tipo de carrocer[ií]a/gi, " ")
+    .replace(/capacidad\s*kg\s*\/?\s*psj/gi, " ")
+    .replace(/cilindrada(?:\s*cc)?/gi, " ")
+    .replace(/raz[oó]n social/gi, " ")
+    .replace(/apellido\(?s?\)?\s*y\s*nombre\(?s?\)?/gi, " ")
+    .replace(/\b(placa|marca|l[ií]nea|modelo|color|servicio|clase|carrocer[ií]a|combustible|capacidad|vin|serie|chasis|motor|reg|propietario|identificaci[oó]n|única|unico)\b/gi, " ")
+    .replace(/[^A-Za-z0-9]/g, "");
+  return sobra.length <= 10;
+}
+
+function cortar(tag: string, resto: string) {
+  const t = resto.replace(/\s+/g, " ").trim();
+  if (tag === "placa") {
+    const m = t.match(/^([A-Z]{3}\d{3}|[A-Z]{3}\d{2}[A-Z])\b\s*/i);
+    if (m) return { valor: m[1].toUpperCase(), resto: t.slice(m[0].length) };
+  }
+  if (tag === "marca") {
+    const hit = MARCAS.find((marca) => new RegExp(`^${marca}\\b`, "i").test(t));
+    if (hit) return { valor: hit, resto: t.slice(hit.length).trimStart() };
+  }
+  if (tag === "linea") {
+    const corte = t.search(/\s+(?:19|20)\d{2}\b/);
+    if (corte > 0) return { valor: t.slice(0, corte).trim(), resto: t.slice(corte).trim() };
+    return { valor: t, resto: "" };
+  }
+  if (tag === "modelo") {
+    const m = t.match(/^(19|20)\d{2}\b\s*/);
+    if (m) return { valor: m[0].trim(), resto: t.slice(m[0].length) };
+  }
+  if (tag === "cilindraje") {
+    const m = t.match(/^(\d{3,5})\b\s*/);
+    if (m && Number(m[1]) >= 50 && Number(m[1]) <= 8000) return { valor: m[1], resto: t.slice(m[0].length) };
+  }
+  if (tag === "color") {
+    const m = t.match(/^([A-ZÁÉÍÓÚÑ]{3,14})\b\s*/i);
+    if (m) return { valor: m[1].toUpperCase(), resto: t.slice(m[0].length) };
+  }
+  if (tag === "servicio") {
+    const m = t.match(/^(P[UÚ]BLICO|PARTICULAR|OFICIAL|DIPLOM[AÁ]TICO|TAXI(?:\s+P[UÚ]BLICO)?)\b\s*/i);
+    if (m) return { valor: m[1], resto: t.slice(m[0].length) };
+  }
+  if (tag === "clase") {
+    const m = t.match(/^(AUTOM[OÓ]VIL|CAMIONETA|CAMPERO)\b\s*/i);
+    if (m) return { valor: m[1], resto: t.slice(m[0].length) };
+  }
+  if (tag === "carroceria") {
+    const m = t.match(/^(HATCH\s*BACK|HATCHBACK|SED[AÁ]N|STATION\s*WAGON|COUPE|CAMIONETA|VAN)\b\s*/i);
+    if (m) return { valor: m[1], resto: t.slice(m[0].length) };
+  }
+  if (tag === "combustible") {
+    const m = t.match(/^(GASOLINA(?:\s+Y\s+GAS)?|DIESEL|ACPM|GAS\s+NATURAL|GNV|EL[EÉ]CTRICO|H[IÍ]BRIDO)\b\s*/i);
+    if (m) return { valor: m[1], resto: t.slice(m[0].length) };
+  }
+  if (tag === "capacidad") {
+    const m = t.match(/^(\d{1,2})\b\s*/);
+    if (m && Number(m[1]) >= 1 && Number(m[1]) <= 15) return { valor: m[1], resto: t.slice(m[0].length) };
+  }
+  if (tag === "motor") {
+    const m = t.match(/^([A-Z0-9]{6,18})\b\s*/i);
+    if (m) return { valor: m[1].toUpperCase(), resto: t.slice(m[0].length) };
+  }
+  if (tag === "vin" || tag === "chasis") {
+    const m = t.match(/^(?:[A-Z]\s+)?([A-HJ-NPR-Z0-9]{17})\b\s*/i);
+    if (m) return { valor: m[1].toUpperCase(), resto: t.slice(m[0].length) };
+  }
+  if (tag === "serie") {
+    if (/^\*|^per\b/i.test(t)) return { valor: "", resto: t.replace(/^\S+\s*/, "") };
+    const m = t.match(/^([A-Z0-9]{6,20})\b\s*/i);
+    if (m) return { valor: m[1].toUpperCase(), resto: t.slice(m[0].length) };
+    return { valor: "", resto: t };
+  }
+  if (tag === "propietario") {
+    const corte = t.split(/\bC\.?\s*C\.?\b|IDENTIFICACI/i)[0] ?? t;
+    return { valor: corte.replace(/\s+\bo$/i, "").trim(), resto: t.slice(corte.length) };
+  }
+  if (tag === "cc") {
+    const m = t.match(/(\d{1,3}(?:\.\d{3}){1,3}|\d{6,11})/);
+    return { valor: m?.[1] ?? "", resto: "" };
+  }
+  if (tag === "empresa") return { valor: t.replace(/[—\-_|]+/g, " ").replace(/\s+/g, " ").trim(), resto: "" };
+  return { valor: "", resto: t };
+}
+
+function camposLicencia(texto: string) {
+  const lineas = texto.split(/\n/).map((linea) => linea.trim()).filter(Boolean);
+  const tomados: Record<string, string> = {};
+  for (let i = 0; i < lineas.length; i += 1) {
+    if (!esFilaDeTitulos(lineas[i])) continue;
+    const tags = etiquetasDe(lineas[i]).map((item) => item.key);
+    let j = i + 1;
+    while (j < lineas.length && /^[\s—\-_|.*]+$/.test(lineas[j])) j += 1;
+    const valores = (lineas[j] ?? "").trim();
+    if (!valores || esFilaDeTitulos(valores)) continue;
+    let resto = valores;
+    for (let n = 0; n < tags.length; n += 1) {
+      const tag = tags[n];
+      const ultimo = n === tags.length - 1;
+      const corte = ultimo && tag !== "vin" && tag !== "chasis" && tag !== "cc" ? { valor: resto, resto: "" } : cortar(tag, resto);
+      if (corte.valor && !tomados[tag]) tomados[tag] = corte.valor;
+      resto = corte.resto.trim();
+      if (!resto) break;
+    }
+  }
+  const placa = placaLeida(tomados.placa ?? "", texto);
+  const marca = marcaEn(tomados.marca ?? "", texto);
+  const linea = lineaEn(tomados.linea ?? "", marca);
+  const modeloDirecto = (tomados.modelo || "").match(/\b(19|20)\d{2}\b/)?.[0] ?? "";
+  const modelo = modeloDirecto || texto.match(/\bmodelo\b[^\d]{0,24}((?:19|20)\d{2})/i)?.[1] || "";
+  const motor = motorValido(tomados.motor ?? "") || motorValido(codigo(lineaSiguiente(lineas, /motor\b/i)));
+  const vin = vinEn(tomados.vin || tomados.chasis || texto);
+  const serie = vin || motorValido(tomados.serie ?? "");
+  const cilindraje = (tomados.cilindraje ?? "").match(/\d{3,5}/)?.[0] ?? texto.match(/cilindrad[ao][^\d]{0,12}(\d{3,5})/i)?.[1] ?? "";
+  const clase = claseEn(tomados.clase ?? "");
+  const carroceria = carroceriaEn(tomados.carroceria ?? "");
+  const combustible = combustibleEn(tomados.combustible ?? "") || combustibleEn(texto);
+  const servicio = servicioEn(tomados.servicio ?? "");
+  const capacidad = (tomados.capacidad ?? "").match(/\d{1,2}/)?.[0] ?? "";
+  const cc = numeroCc(tomados.cc ?? "") || ccDe(texto);
+  const nombre = usable(tomados.propietario || propietarioDe(texto) || nombreDe(texto), 8);
+  const empresa = acercarEmpresa(tomados.empresa || empresaDe(texto));
+  return {
+    placa,
+    marca: (MARCAS as readonly string[]).includes(marca) ? marca : "",
+    linea,
+    modelo,
+    motor,
+    serie,
+    chasis: vin,
+    cilindraje: cilindraje && Number(cilindraje) >= 50 && Number(cilindraje) <= 8000 ? cilindraje : "",
+    clase,
+    carroceria,
+    combustible,
+    servicio,
+    capacidad: capacidad && Number(capacidad) >= 1 && Number(capacidad) <= 15 ? capacidad : "",
+    cc,
+    nombre,
+    nit: nitEn(texto),
+    empresa,
+  };
+}
+
+export function ladoSugerido(claves: string[], usados: Set<string>, preferido = "") {
+  const tiene = (...nombres: string[]) => nombres.some((nombre) => claves.includes(nombre));
+  const propiedad = tiene("marca", "serie", "cilindraje", "carroceria", "clase") || (tiene("placa") && tiene("linea"));
+  const libre = (lado: string) => !usados.has(lado);
+  if (propiedad) {
+    if (libre("tarjeta_propiedad_frente")) return "tarjeta_propiedad_frente";
+    if (libre("tarjeta_propiedad_reverso")) return "tarjeta_propiedad_reverso";
+  }
+  if (tiene("cc", "nombre") && !propiedad) {
+    if (libre("cedula_frente")) return "cedula_frente";
+    if (libre("cedula_reverso")) return "cedula_reverso";
+  }
+  if (tiene("empresa") && !propiedad && libre("tarjeta_operacion")) return "tarjeta_operacion";
+  if (preferido && libre(preferido)) return preferido;
+  return "";
+}
+
+const DE_LA_TARJETA = ["marca", "linea", "modelo", "clase", "carroceria", "motor", "serie", "cilindraje", "capacidad", "servicio"];
+const NO_DE_OPERACION = ["motor", "serie", "marca", "linea", "modelo", "cilindraje", "clase", "carroceria", "nombre"];
+
+export function mezclarLectura(
+  actual: Partial<Record<CampoLeido["key"], string>>,
+  lectura: Pick<LecturaDoc, "campos" | "extra"> & { datos?: LecturaDoc["datos"] },
+  tipo: string,
+) {
+  const datos: Partial<Record<CampoLeido["key"], string>> = { ...(lectura.datos ?? {}) };
+  if (!Object.values(datos).some((valor) => String(valor ?? "").trim())) {
+    for (const campo of lectura.campos) datos[campo.key] = campo.leido;
+  }
+  const deTarjeta = tipo.startsWith("tarjeta_propiedad");
+  const deOperacion = tipo === "tarjeta_operacion" || tipo.startsWith("tarjeta_operacion");
+  const valores: Partial<Record<CampoLeido["key"], string>> = { ...actual };
+  const etiquetas: string[] = [];
+  const choques: CampoLeido[] = [];
+  for (const key of Object.keys(ETIQUETAS) as CampoLeido["key"][]) {
+    if (key === "telefono") continue;
+    const nuevo = String(datos[key] ?? "").trim();
+    if (!nuevo) continue;
+    if (deOperacion && NO_DE_OPERACION.includes(key)) continue;
+    const previo = String(valores[key] ?? "").trim();
+    const ccMejor = key === "cc" && nuevo.replace(/\D/g, "").length > previo.replace(/\D/g, "").length;
+    const nombreMejor = key === "nombre" && nuevo.length > previo.length;
+    const tarjetaMejor = deTarjeta && DE_LA_TARJETA.includes(key);
+    const empresaMejor = key === "empresa" && deOperacion;
+    if (!previo || ccMejor || nombreMejor || tarjetaMejor || empresaMejor) {
+      if (previo !== nuevo) etiquetas.push(ETIQUETAS[key]);
+      valores[key] = nuevo;
+    } else if (previo !== nuevo) choques.push({ key, label: ETIQUETAS[key], actual: previo, leido: nuevo });
+  }
+  return { valores, etiquetas, choques, extra: { ...(lectura.extra ?? {}) } };
 }
 
 function usable(value: string, palabras: number) {
@@ -306,30 +671,39 @@ export function analizarTexto(
         ? "Lo subí, pero no alcancé a leer la foto. Tómala derecha, con luz, y que se vea todo el documento."
         : "Lo subí, pero no alcancé a leerlo. Si el PDF es un escaneo, súbelo en foto.",
       campos: [],
+      datos: {},
+      extra: {},
     };
   }
   const contrato = tipo === "contrato" || tipo === "unificado" ? contratoDesdeTexto(base) : null;
   const mrz = mrzCedula(base);
   const carro = filaVehiculo(base);
+  const licencia = camposLicencia(base);
+  const primero = (...valores: string[]) => valores.find((valor) => valor.trim()) ?? "";
   const leido: Partial<Record<CampoLeido["key"], string>> = {
-    placa: contrato?.placa || carro.placa || placaDe(base),
-    cc: contrato?.cc || mrz.cc || ccDe(base),
-    nombre: usable(contrato?.nombre || mrz.nombre || propietarioDe(base) || nombreDe(base), 8),
+    placa: primero(contrato?.placa || "", licencia.placa, carro.placa, placaDe(base)),
+    cc: primero(contrato?.cc || "", licencia.cc, mrz.cc, ccDe(base)),
+    nombre: usable(primero(contrato?.nombre || "", licencia.nombre, mrz.nombre, propietarioDe(base), nombreDe(base)), 8),
     telefono: contrato?.telefono || telefonoDe(base),
     direccion: usable(contrato?.direccion || valorDe(base, /direcci[oó]n\b/i, 120), 14),
     correo: contrato?.correo || correoDe(base),
-    marca: usable((contrato?.marca || carro.marca || valorDe(base, /\bmarca\b/i, 40)).toUpperCase(), 4),
-    linea: usable((contrato?.linea || carro.linea || valorDe(base, /\bl[ií]nea\b/i, 40)).toUpperCase(), 6),
-    modelo: contrato?.modelo || carro.modelo || (valorDe(base, /\bmodelo\b/i, 20).match(/\b(19|20)\d{2}\b/)?.[0] ?? ""),
-    empresa: usable(empresaDe(base), 8),
-    capacidad: capacidadDe(base),
-    clase: pieza(base, /\bclase\b/i, 20),
-    carroceria: pieza(base, /carrocer[ií]a/i, 24),
-    motor: pieza(base, /\bmotor\b/i, 24),
-    serie: pieza(base, /\b(?:serie|chasis|vin)\b/i, 24),
-    cilindraje: (pieza(base, /cilindraje/i, 12).match(/\d{3,5}/)?.[0] ?? ""),
-    servicio: pieza(base, /\bservicio\b/i, 16),
+    marca: (MARCAS as readonly string[]).includes(primero(contrato?.marca || "", licencia.marca)) ? primero(contrato?.marca || "", licencia.marca) : "",
+    linea: lineaEn(primero(contrato?.linea || "", licencia.linea), primero(contrato?.marca || "", licencia.marca)),
+    modelo: primero(contrato?.modelo || "", licencia.modelo),
+    empresa: licencia.empresa || acercarEmpresa(empresaDe(base)),
+    capacidad: primero(licencia.capacidad, capacidadDe(base)),
+    clase: claseEn(licencia.clase),
+    carroceria: carroceriaEn(licencia.carroceria),
+    motor: motorValido(primero(licencia.motor, "")),
+    serie: vinEn(primero(licencia.serie, licencia.chasis, base)) || motorValido(licencia.serie),
+    cilindraje: licencia.cilindraje,
+    servicio: servicioEn(licencia.servicio),
   };
+  const combustible = licencia.combustible;
+  const datos: Partial<Record<CampoLeido["key"], string>> = {};
+  for (const key of Object.keys(ETIQUETAS) as CampoLeido["key"][]) {
+    if (leido[key]) datos[key] = leido[key];
+  }
   const campos = (Object.keys(ETIQUETAS) as CampoLeido["key"][])
     .filter((key) => leido[key])
     .filter((key) => !igual(actual[key] ?? "", leido[key] ?? ""))
@@ -345,7 +719,11 @@ export function analizarTexto(
         : campos.length
           ? "Leí datos que no coinciden con el proceso. Confirma cada uno."
           : "Lo leí. No encontré una fecha de vencimiento ni datos distintos a los del proceso.";
-  return { vigencia, vence: mostrar(vence), aviso, campos };
+  const extra: Record<string, string> = {};
+  if (combustible) extra.combustible = combustible;
+  if (licencia.chasis) extra.chasis = licencia.chasis;
+  if (licencia.nit) extra.nitAnterior = licencia.nit;
+  return { vigencia, vence: mostrar(vence), aviso, campos, datos, extra };
 }
 
 export const LADOS = [

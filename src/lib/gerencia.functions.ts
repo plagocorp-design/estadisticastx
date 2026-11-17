@@ -753,8 +753,12 @@ export async function plantillaDeCaso(casoId: number) {
     [casoId],
   );
   const fila = rows[0];
-  if (!fila?.contrato_pdf) return undefined;
-  const campos = leerJson<CampoContrato[]>(fila.contrato_campos, []);
+  const campos = leerJson<CampoContrato[]>(fila?.contrato_campos || "", []);
+  if (!campos.length && !fila?.contrato_pdf) return undefined;
+  if (!fila?.contrato_pdf) {
+    const { PLANTILLA } = await import("./contrato-plantilla");
+    return { pdf: PLANTILLA, campos };
+  }
   return { pdf: fila.contrato_pdf, campos: campos.length ? campos : CAMPOS_CONTRATO };
 }
 

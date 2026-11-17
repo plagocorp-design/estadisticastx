@@ -5,6 +5,7 @@ import { cambiosDe, siNo, textoPlano } from "@/lib/auditoria";
 import { casosDeArea, entregaDe, entregaLista, faseDe, hoyBogota, otrosPropietarios, STEPS, toCaso, type Caso, type CasoDraft, type CasoRow, type StepKey } from "@/lib/casos";
 import { configura, esBandeja, esGerencia, llevaProcesos, veElEquipo, type Role } from "@/lib/team.public";
 import { unificarEmpresa } from "@/lib/empresas";
+import { conNit } from "@/lib/nits";
 
 export type Me = { id: string; name: string; slug: string; role: Role; ciudadVista: number | null; acceso: string };
 
@@ -93,6 +94,28 @@ export const listCasos = createServerFn({ method: "GET" })
       if (!ultimo) return caso;
       return { ...caso, actualizadoEn: String(ultimo.created_at), actualizadoPor: ultimo.actor_name };
     });
+  });
+
+export const leerCaso = createServerFn({ method: "POST" })
+  .validator((input: { id?: number }) => ({ id: Number(input?.id) || 0 }))
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }): Promise<Caso | null> => {
+    if (!data.id) return null;
+    const { profileFor } = await import("./team.server");
+    const profile = await profileFor(context.userId);
+    if (!profile) return null;
+    const sql = await getSql();
+    const ciudad = esGerencia(profile.role) ? (profile.ciudad_vista ?? 0) : (profile.ciudad_id ?? 1);
+    const rows = await sql.query<CasoRow>(
+      `select ${CASO_COLS} from casos c join profiles p on p.user_id = c.owner_id
+       where c.id = $1 and coalesce(c.ciudad_id, 1) = $2
+       limit 1`,
+      [data.id, ciudad],
+    );
+    const caso = rows[0] ? toCaso(rows[0]) : null;
+    if (!caso) return null;
+    if (veElEquipo(profile.role) || esBandeja(profile.role) || caso.ownerId === context.userId) return caso;
+    return null;
   });
 
 function clean(value: string, max = 120) {
@@ -253,6 +276,9 @@ export const createCaso = createServerFn({ method: "POST" })
     `;
     const id = rows[0]?.id ?? 0;
     if (id) {
+      await sql.query(`alter table casos add column if not exists datos_extra text not null default ''`);
+      const extra = conNit(data.datosExtra || "{}", empresa);
+      if (extra && extra !== "{}") await sql.query(`update casos set datos_extra = $1 where id = $2`, [extra.slice(0, 4000), id]);
       await sql.query(
         `update casos set ciudad_id = coalesce((select ciudad_id from profiles where user_id = $1), (select ciudad_vista from profiles where user_id = $2), 1) where id = $3`,
         [ownerId, context.userId, id],
@@ -266,6 +292,15 @@ export const createCaso = createServerFn({ method: "POST" })
       etiqueta: placa,
       detalle: `Abrió el proceso ${placa} · ${nombre}${pdf ? ". Subió el contrato" : ""}`,
     });
+    if (id) {
+      try {
+        const ciudad = Number((await sql.query<{ ciudad_id: number }>(`select coalesce(ciudad_id, 1)::int as ciudad_id from casos where id = $1`, [id]))[0]?.ciudad_id) || 1;
+        const { amarrarProcesos } = await import("./callcenter.functions");
+        await amarrarProcesos(sql, ciudad, placa);
+      } catch {
+        /* el proceso ya quedó; estadísticas vuelve a cruzar la placa */
+      }
+    }
     const { notificarSheets } = await import("./sheets.server");
     void notificarSheets();
     return { id: rows[0]?.id ?? 0 };
@@ -505,6 +540,13 @@ export const updateCaso = createServerFn({ method: "POST" })
     }
     const { notificarSheets } = await import("./sheets.server");
     void notificarSheets();
+    try {
+      const ciudad = Number((await sql.query<{ ciudad_id: number }>(`select coalesce(ciudad_id, 1)::int as ciudad_id from casos where id = $1`, [data.id]))[0]?.ciudad_id) || 1;
+      const { amarrarProcesos } = await import("./callcenter.functions");
+      await amarrarProcesos(sql, ciudad, placa);
+    } catch {
+      /* el proceso ya quedó; estadísticas vuelve a cruzar la placa */
+    }
     return { ok: true };
   });
 

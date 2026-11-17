@@ -394,7 +394,7 @@ export function MetaEquipo({
                   {fila.asesor.name.split(" ")[0]}
                   {fila.asesor.role === "lider" ? " · líder" : ""}
                   <span className="mt-0.5 block text-xs font-medium text-ink-soft">
-                    {futuro ? `0 de ${metaAsesor(fila.asesor.slug)}` : `${fila.resumen.hechas} de ${fila.resumen.meta} · ${fila.resumen.pct}%`}
+                    {futuro ? `0 de ${metaAsesor(fila.asesor.slug)}` : textoCorte(fila.resumen.hechas, fila.resumen.meta, fila.resumen.pct)}
                   </span>
                   {edita ? (
                   <input
@@ -426,7 +426,7 @@ export function MetaEquipo({
               <th className="sticky left-0 z-10 bg-card px-3 py-2 text-left font-semibold whitespace-nowrap">
                 Equipo
                 <span className="mt-0.5 block text-xs font-medium text-ink-soft">
-                  {futuro ? `0 de ${metaEquipoMes}` : `${hechasEquipo} de ${metaEquipoHoy} · ${pctEquipo}%`}
+                  {futuro ? `0 de ${metaEquipoMes}` : textoCorte(hechasEquipo, metaEquipoHoy, pctEquipo)}
                 </span>
               </th>
               {columnas.map((columna) => {
@@ -503,6 +503,11 @@ function Nota({ celda }: { celda: CeldaMeta }) {
   }
   if (celda.cuenta >= celda.meta) return <p className="mt-2 text-sm">Cumplió la meta de este día.</p>;
   return null;
+}
+
+function textoCorte(hechas: number, meta: number, pct: number) {
+  if (meta <= 0) return hechas > 0 ? `${hechas} · sin meta al día` : "Sin días que cuenten";
+  return `${hechas} de ${meta} al corte · ${pct}%`;
 }
 
 function tono(celda: CeldaMeta, hoy: string) {

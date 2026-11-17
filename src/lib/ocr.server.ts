@@ -22,9 +22,48 @@ async function prepararFotos(data: Buffer) {
   const cargado = await import("sharp");
   const sharp = typeof cargado.default === "function" ? cargado.default : (cargado as unknown as typeof cargado.default);
   const base = () => sharp(data, { failOn: "none" }).rotate().resize({ width: 2200, height: 2200, fit: "inside", withoutEnlargement: false });
-  const normal = await base().grayscale().normalize().sharpen().png().toBuffer();
-  const contraste = await base().grayscale().linear(1.5, -30).normalize().sharpen().png().toBuffer();
-  return [normal, contraste];
+  const contraste = await base().grayscale().normalize().linear(1.35, -15).sharpen().png().toBuffer();
+  const binaria = await base().grayscale().normalize().threshold(140).png().toBuffer();
+  return [contraste, binaria];
+}
+
+function fotosDePdf(data: Buffer) {
+  const fotos: Buffer[] = [];
+  for (let i = 0; i < data.length - 4; i += 1) {
+    if (data[i] !== 0xff || data[i + 1] !== 0xd8 || data[i + 2] !== 0xff) continue;
+    let fin = i + 2;
+    while (fin < data.length - 1) {
+      if (data[fin] === 0xff && data[fin + 1] === 0xd9) {
+        fin += 2;
+        break;
+      }
+      fin += 1;
+    }
+    if (fin - i > 12_000) fotos.push(data.subarray(i, fin));
+    i = Math.max(i + 1, fin - 1);
+  }
+  return fotos.sort((a, b) => b.length - a.length).slice(0, 2);
+}
+
+async function textoDeBuffer(data: Buffer, esPdf: boolean) {
+  if (!esPdf) return textoFoto(data);
+  let texto = "";
+  try {
+    texto = await textoPdf(data);
+  } catch {
+    texto = "";
+  }
+  if (texto.trim().length >= 40) return texto;
+  const partes = [texto];
+  for (const foto of fotosDePdf(data)) {
+    try {
+      const leido = await textoFoto(foto);
+      if (leido.trim()) partes.push(leido);
+    } catch {
+      /* la foto embebida no se pudo leer */
+    }
+  }
+  return partes.filter((parte) => parte.trim()).join("\n");
 }
 
 async function textoFoto(data: Buffer) {
@@ -44,19 +83,14 @@ async function textoFoto(data: Buffer) {
   try {
     const worker = await lector;
     if (!worker) throw new Error("No pude leer la foto");
-    const partes: string[] = [];
-    for (const imagen of imagenes) {
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
-      const primero = await worker.recognize(imagen);
-      let texto = primero.data.text || "";
-      if (texto.trim().length < 24) {
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
-        const segundo = await worker.recognize(imagen);
-        if ((segundo.data.text || "").trim().length > texto.trim().length) texto = segundo.data.text || "";
-      }
-      if (texto.trim()) partes.push(texto);
+    await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+    const primero = await worker.recognize(imagenes[0]);
+    let texto = primero.data.text || "";
+    if (texto.trim().length < 70 && imagenes[1]) {
+      const segundo = await worker.recognize(imagenes[1]);
+      if ((segundo.data.text || "").trim().length > texto.trim().length) texto = segundo.data.text || "";
     }
-    return partes.join("\n");
+    return texto;
   } catch (err) {
     lector = null;
     throw err;
@@ -68,7 +102,7 @@ export async function leerArchivo(nombre: string, archivo: string, tipo: string,
   const esPdf = nombre.toLowerCase().endsWith(".pdf") || data.subarray(0, 5).toString() === "%PDF-";
   let texto = "";
   try {
-    texto = esPdf ? await textoPdf(data) : await textoFoto(data);
+    texto = await textoDeBuffer(data, esPdf);
   } catch {
     texto = "";
   }
@@ -86,7 +120,7 @@ export async function leerVarias(
     let texto = "";
     try {
       const esPdf = pagina.nombre.toLowerCase().endsWith(".pdf") || data.subarray(0, 5).toString() === "%PDF-";
-      texto = esPdf ? await textoPdf(data) : await textoFoto(data);
+      texto = await textoDeBuffer(data, esPdf);
     } catch {
       texto = "";
     }

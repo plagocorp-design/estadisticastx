@@ -7,6 +7,7 @@ import { type AgendaItem } from "@/lib/agenda";
 import { AgendaView } from "@/components/agenda";
 import { ChatCaso } from "@/components/chat-caso";
 import { EditorHojas } from "@/components/editor-hojas";
+import { esFotoParaRecortar, RecortarFoto } from "@/components/recortar-foto";
 import { BitacoraVista } from "@/components/bitacora";
 import { AuditoriaVista } from "@/components/auditoria";
 import { ControlVista } from "@/components/control";
@@ -17,10 +18,13 @@ import { cuando } from "@/lib/auditoria";
 import { certificadoProceso } from "@/lib/certificado.functions";
 import { EnviarFirma } from "@/components/enviar-firma";
 import { sincronizarDocuseal, verAuditoriaFirma } from "@/lib/firma.functions";
-import { leerPaginas, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
+import { leerDocumento, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
 import { paginasDe } from "@/lib/paginas";
+import { nitDe, conNit } from "@/lib/nits";
+import { CARROCERIAS, CLASES, COMBUSTIBLES, LINEAS, MARCAS, SERVICIOS } from "@/lib/vehiculos";
 import { enviarEnTrozos } from "@/lib/archivo";
 import type { CampoLeido } from "@/lib/ocr";
+import { ladoSugerido, mezclarLectura } from "@/lib/ocr";
 import { listEquipo } from "@/lib/control.functions";
 import type { PersonaEquipo } from "@/lib/control";
 import { MetaEquipo, MetaMia } from "@/components/meta";
@@ -38,6 +42,7 @@ import {
   getMe,
   leerContrato,
   listCasos,
+  leerCaso,
   moverPoliza,
   removeCaso,
   updateCaso,
@@ -75,7 +80,7 @@ import { AvisoTarjeta, avisoSugerido } from "@/components/aviso-tarjeta";
 import { estadoPiloto, pasarMano } from "@/lib/piloto.functions";
 import { etiquetaMarca, marcasDe } from "@/lib/piloto";
 import { buscarEmpresas, unificarEmpresa } from "@/lib/empresas";
-import { consultarTarjeta, type EstadoTarjetaOficial } from "@/lib/tarjeta.functions";
+import { aplicarIntranet, consultarTarjeta, type EstadoTarjetaOficial } from "@/lib/tarjeta.functions";
 
 const GRUPOS = ["Inicio", "Documentos", "Firma", "Póliza", "Tarjeta"] as const;
 const TARJETAS = ["Pendiente", "Radicada", "Expedida"] as const;
@@ -819,11 +824,25 @@ export function Board() {
             key={miraEquipo ? "equipo" : "mio"}
             me={me}
             verEquipo={miraEquipo}
-            onProceso={(id) => {
-              void load().then((rows) => {
+            onProceso={async (id) => {
+              try {
+                const caso = await leerCaso({ data: { id } });
+                if (!caso) throw new Error("El proceso quedó creado. No lo vi en la lista: búscalo por la placa.");
+                setError("");
+                setCasos((prev) => (prev.some((c) => c.id === caso.id) ? prev.map((c) => (c.id === caso.id ? caso : c)) : [caso, ...prev]));
                 setVista("procesos");
-                setOpen(rows.find((c) => c.id === id) ?? null);
-              });
+                setFiltro("curso");
+                setOpen(caso);
+                void load().catch(() => {});
+              } catch (err) {
+                const texto = fallo(err);
+                setError(texto);
+                throw err instanceof Error ? err : new Error(texto);
+              }
+            }}
+            onCerro={(id) => {
+              setCasos((prev) => prev.map((c) => (c.id === id ? { ...c, motivoCierre: c.motivoCierre || "Cerrado", estado: "No se concretó" } : c)));
+              void load().catch(() => {});
             }}
           />
         ) : vista === "bitacora" ? (
@@ -1550,6 +1569,9 @@ function Panel({
   const [leyendoFoto, setLeyendoFoto] = useState("");
   const [editorFotos, setEditorFotos] = useState(false);
   const [hojasArmadas, setHojasArmadas] = useState<{ nombre: string; archivo: string }[]>([]);
+  const [colaRecorte, setColaRecorte] = useState<File[]>([]);
+  const loteRecorteRef = useRef<File[]>([]);
+  const preferidoRecorteRef = useRef<FotoApertura["tipo"] | "">("");
   const [choques, setChoques] = useState<CampoLeido[]>([]);
   const [borrar, setBorrar] = useState(false);
   const [certificando, setCertificando] = useState(false);
@@ -1868,7 +1890,7 @@ function Panel({
         sobraron += parte.sobraron;
       }
       const usadas = paginas.slice(0, 8);
-      const actual = {
+      const actual: Record<string, string> = {
         placa: draft.placa,
         cc: draft.cc,
         nombre: draft.nombre,
@@ -1887,39 +1909,93 @@ function Panel({
         servicio: draft.servicio ?? "",
         empresa: draft.empresa,
       };
-      const leidas = await leerPaginas({ data: { paginas: usadas, preferido, actual } });
-      const llenos: Partial<CasoDraft> = {};
-      const distintos: CampoLeido[] = [];
       const fotos = [...fotosApertura];
+      const usados = new Set<string>(fotos.map((foto) => foto.tipo));
       const puestos: string[] = [];
+      const etiquetas: string[] = [];
+      const distintos: CampoLeido[] = [];
       let sueltas = 0;
-      for (const pagina of leidas.paginas) {
-        const origen = usadas[pagina.indice];
-        if (!origen || !pagina.tipo) {
-          sueltas += 1;
-          continue;
-        }
-        const tipo = pagina.tipo as FotoApertura["tipo"];
-        const item = { tipo, nombre: origen.nombre, archivo: origen.archivo, lectura: JSON.stringify(pagina.lectura) };
-        const puesto = fotos.findIndex((foto) => foto.tipo === tipo);
-        if (puesto >= 0) fotos[puesto] = item;
-        else fotos.push(item);
-        puestos.push(NOMBRE_LADO[tipo]);
-        for (const campo of pagina.lectura.campos) {
-          const valor = String((llenos[campo.key] ?? actual[campo.key]) || "").trim();
-          if (!valor) llenos[campo.key] = campo.leido;
-          else if (valor !== campo.leido) distintos.push(campo);
+      const extraLeido: Record<string, string> = {};
+      const valores: Record<string, string> = { ...actual };
+      const fallos: string[] = [];
+      const leidas: { tipo: string; lectura: Awaited<ReturnType<typeof leerDocumento>>; origen: { nombre: string; archivo: string } }[] = [];
+      for (let indice = 0; indice < usadas.length; indice += 1) {
+        const origen = usadas[indice];
+        setAviso(`Leyendo ${indice + 1} de ${usadas.length}…`);
+        try {
+          const lectura = await leerDocumento({
+            data: { tipo: preferido || "foto", nombre: origen.nombre, archivo: origen.archivo, actual: valores },
+          });
+          const claves = Object.entries(lectura.datos ?? {})
+            .filter(([, valor]) => String(valor ?? "").trim())
+            .map(([key]) => key);
+          const tipo = ladoSugerido(claves.length ? claves : lectura.campos.map((campo) => campo.key), usados, preferido);
+          if (tipo) usados.add(tipo);
+          leidas.push({ tipo, lectura, origen });
+        } catch (err) {
+          fallos.push(err instanceof Error ? err.message : "No pude leer una foto");
         }
       }
-      if (Object.keys(llenos).length) setDraft((prev) => ({ ...prev, ...llenos }));
+      leidas.sort((a, b) => ordenLectura(a.tipo) - ordenLectura(b.tipo));
+      for (const item of leidas) {
+        const tipo = item.tipo;
+        if (tipo && NOMBRE_LADO[tipo as FotoApertura["tipo"]]) {
+          const slot = tipo as FotoApertura["tipo"];
+          usados.add(slot);
+          const foto = { tipo: slot, nombre: item.origen.nombre, archivo: item.origen.archivo, lectura: JSON.stringify(item.lectura) };
+          const puesto = fotos.findIndex((actualFoto) => actualFoto.tipo === slot);
+          if (puesto >= 0) fotos[puesto] = foto;
+          else fotos.push(foto);
+          puestos.push(NOMBRE_LADO[slot]);
+        } else sueltas += 1;
+        const mix = mezclarLectura(valores, item.lectura, tipo);
+        Object.assign(valores, mix.valores);
+        for (const etiqueta of mix.etiquetas) if (!etiquetas.includes(etiqueta)) etiquetas.push(etiqueta);
+        for (const choque of mix.choques) {
+          if (!distintos.some((campo) => campo.key === choque.key)) distintos.push(choque);
+        }
+        Object.assign(extraLeido, mix.extra);
+      }
+      setDraft((prev) => {
+        let mapa: Record<string, string> = {};
+        try {
+          const leido = JSON.parse(prev.datosExtra || "{}") as Record<string, string>;
+          if (leido && typeof leido === "object") mapa = leido;
+        } catch {
+          mapa = {};
+        }
+        const junto = { ...mapa, ...extraLeido };
+        if (valores.empresa) {
+          const conEmpresa = conNit(JSON.stringify(junto), String(valores.empresa));
+          try {
+            Object.assign(junto, JSON.parse(conEmpresa) as Record<string, string>);
+          } catch {
+            /* se queda lo leído */
+          }
+        }
+        const patch: Partial<CasoDraft> = {};
+        for (const key of ["placa", "cc", "nombre", "empresa", "marca", "linea", "modelo", "capacidad", "clase", "carroceria", "motor", "serie", "cilindraje", "servicio", "direccion", "correo"] as const) {
+          const valor = String(valores[key] ?? "").trim();
+          if (valor) patch[key] = valor;
+        }
+        return {
+          ...prev,
+          ...patch,
+          datosExtra: Object.keys(junto).length ? JSON.stringify(junto) : prev.datosExtra,
+        };
+      });
       setChoques((prev) => [...prev.filter((item) => !distintos.some((campo) => campo.key === item.key)), ...distintos]);
       setFotosApertura(fotos);
-      const etiquetas = Object.keys(llenos).map((key) => distintos.concat(leidas.paginas.flatMap((pagina) => pagina.lectura.campos)).find((campo) => campo.key === key)?.label ?? key);
+      const resumen = [valores.placa, valores.nombre, valores.cc, [valores.marca, valores.linea, valores.modelo].filter(Boolean).join(" "), valores.empresa]
+        .filter(Boolean)
+        .join(" · ");
       const donde = puestos.length ? `Ubiqué ${puestos.join(", ")}.` : "No ubiqué de qué documento se trata.";
       setAviso(
         [
           donde,
-          etiquetas.length ? `Llené ${etiquetas.join(", ")}. Revisa y escribe el celular.` : "",
+          etiquetas.length ? `Llené ${etiquetas.join(", ")}.` : fallos[0] || "No leí datos en esa foto. Tómala derecha, con luz, y que se vea el documento completo.",
+          resumen ? `Quedó: ${resumen}.` : "",
+          "El celular lo escribes tú.",
           sueltas ? `${sueltas} página${sueltas === 1 ? "" : "s"} no la ubiqué. Súbela en su casilla.` : "",
           sobraron ? `Dejé por fuera ${sobraron} páginas. El máximo es 8.` : "",
         ]
@@ -1930,6 +2006,39 @@ function Panel({
       setAviso(err instanceof Error ? err.message : "No pude leer el documento. Escríbelo a mano.");
     } finally {
       setLeyendoFoto("");
+    }
+  }
+
+  function empezarRecorte(preferido: FotoApertura["tipo"] | "", files: File[]) {
+    const fotos = files.filter(esFotoParaRecortar);
+    const otros = files.filter((item) => !esFotoParaRecortar(item));
+    if (!fotos.length) {
+      void leerApertura(preferido, files);
+      return;
+    }
+    preferidoRecorteRef.current = preferido;
+    loteRecorteRef.current = otros;
+    setColaRecorte(fotos);
+  }
+
+  function recorteListo(file: File) {
+    const resto = colaRecorte.slice(1);
+    const lote = [...loteRecorteRef.current, file];
+    loteRecorteRef.current = lote;
+    setColaRecorte(resto);
+    if (!resto.length) {
+      loteRecorteRef.current = [];
+      void leerApertura(preferidoRecorteRef.current, lote);
+    }
+  }
+
+  function saltarRecorte() {
+    const resto = colaRecorte.slice(1);
+    setColaRecorte(resto);
+    if (!resto.length && loteRecorteRef.current.length) {
+      const lote = loteRecorteRef.current;
+      loteRecorteRef.current = [];
+      void leerApertura(preferidoRecorteRef.current, lote);
     }
   }
 
@@ -2137,7 +2246,7 @@ function Panel({
       <div className="rise flex h-dvh w-full flex-col bg-card lg:max-w-3xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div>
-            <h2 className="text-lg font-semibold">{caso ? caso.placa : "Nuevo seguimiento"}</h2>
+            <h2 className="text-lg font-semibold">{caso ? caso.placa : "Nuevo proceso"}</h2>
             {vivo ? (
               <p className="text-sm text-ink-soft">
                 {vivo.estado} · {vivo.hechos} de 16 · {vivo.avance}%
@@ -2169,8 +2278,8 @@ function Panel({
             <>
             <form id="nuevo" onSubmit={create} className="grid gap-3">
               <div className="grid gap-2 rounded-2xl border border-line bg-paper p-3">
-                <p className="text-sm font-semibold">Abre el seguimiento con las fotos</p>
-                <p className="text-sm text-ink-soft">Cédula por las dos caras, tarjeta de propiedad por las dos caras y tarjeta de operación. Puedes subir las fotos o un PDF con varias páginas: el programa las separa. El celular no sale en el documento: escríbelo tú.</p>
+                <p className="text-sm font-semibold">Abre el proceso con las fotos</p>
+                <p className="text-sm text-ink-soft">Cédula por las dos caras, tarjeta de propiedad por las dos caras y tarjeta de operación. Si es foto, primero la recortas. Un PDF de varias páginas se separa solo. El celular no sale en el documento: escríbelo tú.</p>
                 <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">
                   {leyendoFoto === "lote" ? "Leyendo…" : "Subir PDF o varias fotos"}
                   <input
@@ -2182,15 +2291,16 @@ function Panel({
                     onChange={(e) => {
                       const files = e.target.files ? Array.from(e.target.files) : [];
                       e.target.value = "";
-                      if (files.length) void leerApertura("", files);
+                      if (files.length) empezarRecorte("", files);
                     }}
                   />
                 </label>
-                <FotoApertura etiqueta="Cédula, frente" src={srcFoto("cedula_frente")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_frente")} leyendo={leyendoFoto === "cedula_frente" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("cedula_frente", [file])} />
-                <FotoApertura etiqueta="Cédula, reverso" src={srcFoto("cedula_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_reverso")} leyendo={leyendoFoto === "cedula_reverso" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("cedula_reverso", [file])} />
-                <FotoApertura etiqueta="Tarjeta de propiedad, frente" src={srcFoto("tarjeta_propiedad_frente")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_frente")} leyendo={leyendoFoto === "tarjeta_propiedad_frente" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("tarjeta_propiedad_frente", [file])} />
-                <FotoApertura etiqueta="Tarjeta de propiedad, reverso" src={srcFoto("tarjeta_propiedad_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_reverso")} leyendo={leyendoFoto === "tarjeta_propiedad_reverso" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("tarjeta_propiedad_reverso", [file])} />
-                <FotoApertura etiqueta="Tarjeta de operación" src={srcFoto("tarjeta_operacion")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion" || leyendoFoto === "lote"} onFile={(file) => void leerApertura("tarjeta_operacion", [file])} />
+                <FotoApertura etiqueta="Cédula, frente" src={srcFoto("cedula_frente")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_frente")} leyendo={leyendoFoto === "cedula_frente" || leyendoFoto === "lote"} onFile={(file) => empezarRecorte("cedula_frente", [file])} />
+                <FotoApertura etiqueta="Cédula, reverso" src={srcFoto("cedula_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "cedula_reverso")} leyendo={leyendoFoto === "cedula_reverso" || leyendoFoto === "lote"} onFile={(file) => empezarRecorte("cedula_reverso", [file])} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, frente" src={srcFoto("tarjeta_propiedad_frente")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_frente")} leyendo={leyendoFoto === "tarjeta_propiedad_frente" || leyendoFoto === "lote"} onFile={(file) => empezarRecorte("tarjeta_propiedad_frente", [file])} />
+                <FotoApertura etiqueta="Tarjeta de propiedad, reverso" src={srcFoto("tarjeta_propiedad_reverso")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_propiedad_reverso")} leyendo={leyendoFoto === "tarjeta_propiedad_reverso" || leyendoFoto === "lote"} onFile={(file) => empezarRecorte("tarjeta_propiedad_reverso", [file])} />
+                <FotoApertura etiqueta="Tarjeta de operación" src={srcFoto("tarjeta_operacion")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion" || leyendoFoto === "lote"} onFile={(file) => empezarRecorte("tarjeta_operacion", [file])} />
+                {aviso ? <p className="text-sm text-ink-soft">{aviso}</p> : null}
                 <button type="button" disabled={fotosApertura.length === 0} onClick={() => setEditorFotos(true)} className="h-11 rounded-2xl border border-line bg-card px-3 text-sm font-semibold disabled:opacity-50">
                   {hojasArmadas.length ? `Hojas armadas: ${hojasArmadas.length}. Acomodar otra vez` : "Acomodar estas fotos en hojas"}
                 </button>
@@ -2218,29 +2328,53 @@ function Panel({
                 </div>
               ))}
               {delEquipo ? <AsesorSelect value={ownerSlug} onChange={setOwnerSlug} /> : null}
-              <Field label="Placa" value={draft.placa} onChange={(v) => setDraft({ ...draft, placa: v.toUpperCase() })} />
-              <Field label="CC del propietario" value={draft.cc} onChange={(v) => setDraft({ ...draft, cc: v })} />
-              <Field label="Nombre del propietario" value={draft.nombre} onChange={(v) => setDraft({ ...draft, nombre: v })} />
-              <Field label="Celular" value={draft.telefono} onChange={(v) => setDraft({ ...draft, telefono: v })} />
+              <Field label="Placa" value={draft.placa} onChange={(v) => setDraft((d) => ({ ...d, placa: v.toUpperCase() }))} />
+              <Field label="CC del propietario" value={draft.cc} onChange={(v) => setDraft((d) => ({ ...d, cc: v }))} />
+              <Field label="Nombre del propietario" value={draft.nombre} onChange={(v) => setDraft((d) => ({ ...d, nombre: v }))} />
+              <Field label="Celular" value={draft.telefono} onChange={(v) => setDraft((d) => ({ ...d, telefono: v }))} />
               <OtrosPropietarios valor={draft.copropietarios ?? ""} onChange={(copropietarios) => setDraft((actual) => ({ ...actual, copropietarios }))} />
-              <EmpresaSelect value={draft.empresa} onChange={(v) => setDraft({ ...draft, empresa: v })} />
-              <Origen key="nuevo" value={draft.origen ?? ""} onChange={(v) => setDraft({ ...draft, origen: v })} />
-              <DatosContrato
-                direccion={draft.direccion}
-                correo={draft.correo}
-                marca={draft.marca}
-                linea={draft.linea}
-                modelo={draft.modelo}
-                capacidad={draft.capacidad}
-                clase={draft.clase}
-                carroceria={draft.carroceria}
-                motor={draft.motor}
-                serie={draft.serie}
-                cilindraje={draft.cilindraje}
-                servicio={draft.servicio}
-                fechaFirma={draft.fechaFirma}
-                onChange={(patch) => setDraft({ ...draft, ...patch })}
+              <EmpresaSelect
+                value={draft.empresa}
+                onChange={(v) => setDraft((d) => ({ ...d, empresa: v, datosExtra: conNit(d.datosExtra || "{}", v) }))}
               />
+              <Origen key="nuevo" value={draft.origen ?? ""} onChange={(v) => setDraft((d) => ({ ...d, origen: v }))} />
+              {draft.placa || draft.nombre || draft.cc || draft.marca ? (
+                <p className="rounded-2xl bg-paper px-3 py-2 text-sm font-semibold">
+                  {[draft.placa, draft.nombre, draft.cc, [draft.marca, draft.linea, draft.modelo].filter(Boolean).join(" "), draft.empresa].filter(Boolean).join(" · ")}
+                </p>
+              ) : null}
+              {draft.marca || draft.linea || draft.modelo || draft.motor || draft.serie || draft.clase || draft.carroceria || draft.cilindraje || draft.capacidad ? (
+                <div className="grid gap-3 rounded-2xl bg-paper p-3">
+                  <p className="text-xs font-semibold tracking-wide text-ink-soft uppercase">Leído de la tarjeta</p>
+                  <p className="text-xs text-ink-soft">Revísala. Si falta algo, se completa en Firma, dentro de Datos del contrato.</p>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <Elegir label="Marca" value={draft.marca ?? ""} opciones={MARCAS} onChange={(marca) => setDraft((d) => ({ ...d, marca, linea: d.marca === marca ? d.linea : "" }))} />
+                    <Elegir label="Línea" value={draft.linea ?? ""} opciones={LINEAS[(draft.marca ?? "").toUpperCase()] ?? [...new Set(Object.values(LINEAS).flat())]} onChange={(linea) => setDraft((d) => ({ ...d, linea }))} />
+                    <Field label="Modelo" optional value={draft.modelo ?? ""} onChange={(modelo) => setDraft((d) => ({ ...d, modelo }))} />
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Elegir label="Clase" value={draft.clase ?? ""} opciones={CLASES} onChange={(clase) => setDraft((d) => ({ ...d, clase }))} />
+                    <Elegir label="Carrocería" value={draft.carroceria ?? ""} opciones={CARROCERIAS} onChange={(carroceria) => setDraft((d) => ({ ...d, carroceria }))} />
+                    <Field label="Motor" optional value={draft.motor ?? ""} onChange={(motor) => setDraft((d) => ({ ...d, motor }))} />
+                    <Field label="Serie / chasis" optional value={draft.serie ?? ""} onChange={(serie) => setDraft((d) => ({ ...d, serie }))} />
+                    <Field label="Cilindraje" optional value={draft.cilindraje ?? ""} onChange={(cilindraje) => setDraft((d) => ({ ...d, cilindraje }))} />
+                    <Elegir label="Servicio" value={draft.servicio ?? ""} opciones={SERVICIOS} onChange={(servicio) => setDraft((d) => ({ ...d, servicio }))} />
+                    <Elegir
+                      label="Combustible"
+                      value={(() => { try { return JSON.parse(draft.datosExtra || "{}").combustible || ""; } catch { return ""; } })()}
+                      opciones={COMBUSTIBLES}
+                      onChange={(combustible) => setDraft((d) => {
+                        let mapa: Record<string, string> = {};
+                        try { mapa = JSON.parse(d.datosExtra || "{}") as Record<string, string>; } catch { mapa = {}; }
+                        return { ...d, datosExtra: JSON.stringify({ ...mapa, combustible }) };
+                      })}
+                    />
+                    <Field label="Pasajeros" optional value={draft.capacidad ?? ""} onChange={(capacidad) => setDraft((d) => ({ ...d, capacidad: capacidad.replace(/\D/g, "").slice(0, 2) }))} />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-ink-soft">Los datos del vehículo se leen de la tarjeta de propiedad. Si la foto no se deja leer, se completan en Firma, dentro de Datos del contrato.</p>
+              )}
             </form>
             {editorFotos ? (
               <EditorHojas
@@ -2249,7 +2383,20 @@ function Panel({
                 onGuardar={(hojas) => {
                   setHojasArmadas(hojas);
                   setEditorFotos(false);
-                  setAviso(hojas.length === 1 ? "Armé 1 hoja. Se guarda al crear el seguimiento." : `Armé ${hojas.length} hojas. Se guardan al crear el seguimiento.`);
+                  setAviso(hojas.length === 1 ? "Armé 1 hoja. Se guarda al crear el proceso." : `Armé ${hojas.length} hojas. Se guardan al crear el proceso.`);
+                }}
+              />
+            ) : null}
+            {colaRecorte[0] ? (
+              <RecortarFoto
+                key={`${colaRecorte.length}-${colaRecorte[0].name}-${colaRecorte[0].size}-${colaRecorte[0].lastModified}`}
+                file={colaRecorte[0]}
+                total={colaRecorte.length}
+                onListo={recorteListo}
+                onCancelar={saltarRecorte}
+                onCancelarTodas={() => {
+                  loteRecorteRef.current = [];
+                  setColaRecorte([]);
                 }}
               />
             ) : null}
@@ -2340,7 +2487,11 @@ function Panel({
                 {canEdit && pestana === "firma" ? (
                   <>
                     <SubirContrato busy={leyendo || busy} onFile={tomarContrato} />
-                    <DatosDeParte parte="Firma" form={form} campos={camposCfg} faltan={faltanFirma} onChange={(patch) => setForm({ ...form, ...patch })} />
+                    <FormularioContrato
+                      resumen={[form.marca, form.linea, form.modelo, form.placa].filter(Boolean).join(" · ") || "Todavía no hay datos del contrato"}
+                    >
+                      <DatosDeParte parte="Firma" form={form} campos={camposCfg} faltan={faltanFirma} onChange={(patch) => setForm({ ...form, ...patch })} />
+                    </FormularioContrato>
                     <EnviarFirma
                       casoId={form.id}
                       correo={form.correo}
@@ -2361,6 +2512,14 @@ function Panel({
                       cilindraje={form.cilindraje}
                       servicio={form.servicio}
                       copropietarios={form.copropietarios}
+                      nitInicial={(() => {
+                        try {
+                          const extra = JSON.parse(form.datosExtra || "{}") as Record<string, string>;
+                          return extra.nitAnterior || nitDe(form.empresa);
+                        } catch {
+                          return nitDe(form.empresa);
+                        }
+                      })()}
                       exigir={(camposCfg.length ? camposCfg : DATOS_CONTRATO.map((dato) => ({ campo: dato.campo, label: dato.label, pide: dato.pide })))
                         .filter((campo) => campo.pide === "Firma" && !["firma", "dia", "mes", "ano", "nitAnterior", "copropietario", "cc2"].includes(campo.campo))
                         .map((campo) => ({ clave: campo.campo, label: campo.label, valor: valorDato(form, campo.campo) }))}
@@ -2504,7 +2663,11 @@ function Panel({
               ) : null}
               {pestana === "tarjeta" ? (
                 <div className="grid gap-3">
-                  <EstadoIntranet placa={form.placa} />
+                  <EstadoIntranet
+                    placa={form.placa}
+                    casoId={form.id}
+                    onMarcar={(patch) => setForm({ ...form, ...patch })}
+                  />
                   <div>
                   <p className="text-sm font-medium">Lo que marcamos nosotros</p>
                   <div className="mt-2 grid grid-cols-3 gap-2">
@@ -2685,7 +2848,7 @@ function Panel({
           )}
           {!caso ? (
             <button form="nuevo" disabled={busy} className="h-12 flex-1 rounded-2xl bg-lime font-semibold text-ink disabled:opacity-60">
-              {busy ? "Abriendo…" : "Abrir seguimiento"}
+              {busy ? "Abriendo…" : "Abrir proceso"}
             </button>
           ) : canEdit ? (
             <>
@@ -2924,7 +3087,7 @@ function Origen({ value, onChange }: { value: string; onChange: (value: string) 
                 setOtro(false);
                 onChange(on ? "" : opcion);
               }}
-              className={"h-11 rounded-2xl border px-2 text-sm font-semibold " + (on ? "border-navy bg-navy text-paper" : "border-line")}
+              className={"min-h-11 rounded-2xl border px-2 py-2 text-xs font-semibold leading-tight sm:text-sm " + (on ? "border-navy bg-navy text-paper" : "border-line")}
             >
               {opcion}
             </button>
@@ -3015,6 +3178,13 @@ const NOMBRE_LADO: Record<FotoApertura["tipo"], string> = {
   tarjeta_operacion: "tarjeta de operación",
 };
 
+function ordenLectura(tipo: string) {
+  if (tipo.startsWith("tarjeta_propiedad")) return 0;
+  if (tipo.startsWith("cedula")) return 1;
+  if (tipo.startsWith("tarjeta_operacion")) return 2;
+  return 3;
+}
+
 function borradorVacio(): CasoDraft {
   return {
     placa: "",
@@ -3086,6 +3256,39 @@ function valorDato(form: Caso, campo: string) {
   }
 }
 
+function Elegir({ label, value, opciones, onChange }: { label: string; value: string; opciones: readonly string[]; onChange: (valor: string) => void }) {
+  const extra = value && !opciones.includes(value) ? [value] : [];
+  return (
+    <label className="text-sm font-medium">
+      {label}
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-line px-3">
+        <option value="">Elegir</option>
+        {[...extra, ...opciones].map((opcion) => (
+          <option key={opcion} value={opcion}>
+            {opcion}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function FormularioContrato({ resumen, children }: { resumen: string; children: ReactNode }) {
+  const [abierto, setAbierto] = useState(false);
+  return (
+    <div className="rounded-2xl border border-line">
+      <button type="button" onClick={() => setAbierto((valor) => !valor)} className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left">
+        <span>
+          <span className="block text-sm font-semibold">Datos del contrato</span>
+          <span className="block text-xs text-ink-soft">{resumen}</span>
+        </span>
+        <span className="text-sm font-semibold">{abierto ? "Cerrar" : "Abrir"}</span>
+      </button>
+      {abierto ? <div className="border-t border-line p-3">{children}</div> : null}
+    </div>
+  );
+}
+
 function DatosDeParte({
   parte,
   form,
@@ -3117,17 +3320,39 @@ function DatosDeParte({
   function ponerExtra(campo: string, valor: string) {
     onChange({ datosExtra: JSON.stringify({ ...extra, [campo]: valor }) });
   }
+  const nitEmpresa = nitDe(form.empresa);
+  useEffect(() => {
+    if (parte !== "Firma" || !nitEmpresa || extra.nitAnterior === nitEmpresa) return;
+    ponerExtra("nitAnterior", nitEmpresa);
+  }, [form.empresa, nitEmpresa, parte]);
   return (
     <div className="grid gap-3 rounded-2xl bg-paper p-3">
       <p className="text-xs font-semibold tracking-wide text-ink-soft uppercase">{parte === "Firma" ? "Datos del contrato" : "Datos del seguimiento"}</p>
       {items.map((campo) => {
         if (["copropietario", "cc2", "dia", "mes", "ano", "nitAnterior", "firma"].includes(campo.campo)) return null;
-        if (campo.campo === "empresa") return <EmpresaSelect key="empresa" value={form.empresa} onChange={(valor) => onChange({ empresa: valor })} />;
+        if (campo.campo === "empresa") {
+          return (
+            <EmpresaSelect
+              key="empresa"
+              value={form.empresa}
+              onChange={(valor) => onChange({ empresa: valor, datosExtra: conNit(form.datosExtra, valor) })}
+            />
+          );
+        }
         if (campo.campo === "origen") return <Origen key={`${form.id}-origen`} value={form.origen} onChange={(valor) => onChange({ origen: valor })} />;
         if (campo.campo === "placa") return <Field key="placa" label="Placa" value={form.placa} malo={faltan.includes("placa")} onChange={(valor) => onChange({ placa: valor.toUpperCase() })} />;
         const conocido = ["cc", "nombre", "telefono", "direccion", "correo", "marca", "linea", "modelo", "capacidad", "clase", "carroceria", "motor", "serie", "cilindraje", "servicio"].includes(campo.campo);
         if (conocido) {
           const valor = String((form as unknown as Record<string, unknown>)[campo.campo] ?? "");
+          if (campo.campo === "marca") return <Elegir key="marca" label={campo.label} value={valor} opciones={MARCAS} onChange={(marca) => onChange({ marca, linea: "" })} />;
+          if (campo.campo === "linea") {
+            const deMarca = LINEAS[form.marca.toUpperCase()] ?? [];
+            const opciones = deMarca.length ? deMarca : [...new Set(Object.values(LINEAS).flat())];
+            return <Elegir key="linea" label={campo.label} value={valor} opciones={opciones} onChange={(linea) => onChange({ linea })} />;
+          }
+          if (campo.campo === "clase") return <Elegir key="clase" label={campo.label} value={valor} opciones={CLASES} onChange={(clase) => onChange({ clase })} />;
+          if (campo.campo === "carroceria") return <Elegir key="carroceria" label={campo.label} value={valor} opciones={CARROCERIAS} onChange={(carroceria) => onChange({ carroceria })} />;
+          if (campo.campo === "servicio") return <Elegir key="servicio" label={campo.label} value={valor} opciones={SERVICIOS} onChange={(servicio) => onChange({ servicio })} />;
           return (
             <Field
               key={campo.campo}
@@ -3138,7 +3363,11 @@ function DatosDeParte({
             />
           );
         }
-        return <Field key={campo.campo} label={campo.label} optional value={extra[campo.campo] ?? ""} malo={faltan.includes(campo.campo)} onChange={(valor) => ponerExtra(campo.campo, valor)} />;
+        return /combustible/i.test(campo.label) ? (
+          <Elegir key={campo.campo} label={campo.label} value={extra[campo.campo] ?? ""} opciones={COMBUSTIBLES} onChange={(valor) => ponerExtra(campo.campo, valor)} />
+        ) : (
+          <Field key={campo.campo} label={campo.label} optional value={extra[campo.campo] ?? ""} malo={faltan.includes(campo.campo)} onChange={(valor) => ponerExtra(campo.campo, valor)} />
+        );
       })}
       {coprop ? <OtrosPropietarios valor={form.copropietarios} onChange={(copropietarios) => onChange({ copropietarios })} /> : null}
       {fecha ? (
@@ -3147,8 +3376,13 @@ function DatosDeParte({
           <input type="date" value={form.fechaFirma} onChange={(event) => onChange({ fechaFirma: event.target.value })} className="mt-1 h-11 w-full rounded-2xl border border-line px-3" />
         </label>
       ) : null}
-      {items.some((campo) => campo.campo === "nitAnterior") ? (
-        <Field label="NIT de la empresa anterior" optional value={extra.nitAnterior ?? ""} onChange={(valor) => ponerExtra("nitAnterior", valor)} />
+      {parte === "Firma" ? (
+        <Field
+          label="NIT de la empresa anterior"
+          optional
+          value={extra.nitAnterior || nitDe(form.empresa)}
+          onChange={(valor) => ponerExtra("nitAnterior", valor)}
+        />
       ) : null}
     </div>
   );
@@ -3337,9 +3571,20 @@ function Field({
   );
 }
 
-function EstadoIntranet({ placa }: { placa: string }) {
+function marcaIntranet(estado: string): Partial<Caso> | null {
+  if (estado === "Entregada") return { estadoTarjeta: "Expedida", tarjetaEntregada: true, opTarjeta: "entregada" };
+  if (estado === "Expedida" || estado === "Impresa" || estado === "En la empresa") return { estadoTarjeta: "Expedida", opTarjeta: "expedida" };
+  if (estado === "En movilidad" || estado === "En VUS") return { estadoTarjeta: "Radicada", opTarjeta: "movilidad" };
+  if (estado === "Radicada") return { estadoTarjeta: "Radicada", opTarjeta: "radicada" };
+  if (estado === "En trámite") return { estadoTarjeta: "Pendiente", opTarjeta: "pagada" };
+  return null;
+}
+
+function EstadoIntranet({ placa, casoId, onMarcar }: { placa: string; casoId: number; onMarcar: (patch: Partial<Caso>) => void }) {
   const [dato, setDato] = useState<EstadoTarjetaOficial | null>(null);
+  const [nota, setNota] = useState("");
   const [busy, setBusy] = useState(false);
+  const aplicado = useRef("");
 
   async function consultar() {
     const limpia = placa.trim();
@@ -3349,7 +3594,20 @@ function EstadoIntranet({ placa }: { placa: string }) {
     }
     setBusy(true);
     try {
-      setDato(await consultarTarjeta({ data: limpia }));
+      const respuesta = await consultarTarjeta({ data: limpia });
+      setDato(respuesta);
+      const clave = `${casoId}:${respuesta.estado}`;
+      if (!respuesta.ok || aplicado.current === clave) return;
+      const marca = marcaIntranet(respuesta.estado);
+      if (!marca) return;
+      aplicado.current = clave;
+      await aplicarIntranet({ data: { id: casoId, estado: respuesta.estado } });
+      onMarcar(marca);
+      setNota(
+        marca.tarjetaEntregada
+          ? "La intranet dice que ya se entregó. Marqué el proceso como expedida y la tarjeta como entregada."
+          : `Marqué el proceso como ${marca.estadoTarjeta === "Pendiente" ? "pendiente" : marca.estadoTarjeta === "Radicada" ? "radicada" : "expedida"}.`,
+      );
     } catch (err) {
       const aviso = err instanceof Error ? err.message : "No pude consultar la intranet de Taxis Libres.";
       setDato({ ok: false, estado: "Sin respuesta", detalle: aviso, bloqueo: "" });
@@ -3384,6 +3642,7 @@ function EstadoIntranet({ placa }: { placa: string }) {
           <p className="text-lg font-semibold">{dato.estado || "Sin estado"}</p>
           {dato.detalle && dato.detalle !== dato.estado ? <p className="mt-1 text-sm">{dato.detalle}</p> : null}
           {dato.bloqueo ? <p className="mt-1 text-sm">Bloqueo: {dato.bloqueo}</p> : null}
+          {nota ? <p className="mt-2 text-sm font-medium">{nota}</p> : null}
         </div>
       ) : (
         <p className="mt-3 text-sm text-ink-soft">Consultando…</p>

@@ -311,6 +311,19 @@ export function unificarEmpresa(value: string) {
   return escrito.slice(0, 80);
 }
 
+export function acercarEmpresa(value: string) {
+  const oficial = unificarEmpresa(value);
+  if ((EMPRESAS as readonly string[]).includes(oficial)) return oficial;
+  const q = tokens(value).join("");
+  if (q.length < 6) return "";
+  const hits = EMPRESAS.filter((empresa) => {
+    const compacto = tokens(empresa).join("");
+    if (Math.abs(compacto.length - q.length) > 2) return false;
+    return compacto === q || dist(compacto, q) <= 2;
+  });
+  return hits.length === 1 ? hits[0] : "";
+}
+
 export function buscarEmpresas(q: string) {
   const plano = q.trim().normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
   if (!plano) return [...EMPRESAS];

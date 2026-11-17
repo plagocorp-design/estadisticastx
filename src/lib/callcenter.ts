@@ -264,6 +264,7 @@ function leerGestion(fila, nombreProp, telProp) {
 		noAplicaAfiliacion: afiliacion.noAplica,
 		motivo: fila.motivo.trim().slice(0, 80),
 		observacionFinal: final.slice(0, 2e3),
+		canal: fila.canal === "whatsapp" ? "whatsapp" : "llamada",
 		tipoPersona: leido.tipoPersona,
 		cc: leido.cc || fila.cc.replace(/\D/g, ""),
 		tieneNuevo: leido.tieneNuevo,
@@ -304,6 +305,9 @@ export function expandirFila(fila) {
 			placa,
 			anio,
 			cc: i === 0 ? ccFila : "",
+			agente: String(fila.agente || "").replace(/\s+/g, " ").trim().slice(0, 120),
+			turnoSlug: "",
+			enCola: 0,
 			gestion
 		});
 	}
@@ -405,7 +409,7 @@ var ALIAS = {
 	calificacion: ["calificacion"],
 	sao: ["observacion sao"],
 	conductor: ["observacion conductor"],
-	propietarioObs: ["observacion propietario"],
+	propietarioObs: ["observacion propietario", "observacion"],
 	intencion: ["intencion de afiliacion", "intención de afiliacion"],
 	proxima: ["proxima gestion", "próxima gestion"],
 	fechaProxima: ["fecha proxima gestion", "fecha próxima gestion"],
@@ -457,7 +461,8 @@ export function filasDesdeTabla(headers, rows) {
 			resultado: tomar(idx.resultado),
 			fechaAfiliacion: tomar(idx.fechaAfiliacion),
 			motivo: tomar(idx.motivo),
-			observacionFinal: tomar(idx.observacionFinal)
+			observacionFinal: tomar(idx.observacionFinal),
+			canal: ""
 		};
 	}).filter((fila) => fila.nombre || fila.telefono || fila.placa);
 }
@@ -638,6 +643,7 @@ export type FilaCruda = {
   fechaAfiliacion: string;
   motivo: string;
   observacionFinal: string;
+  canal: string;
 };
 
 export type GestionImportada = {
@@ -657,6 +663,7 @@ export type GestionImportada = {
   noAplicaAfiliacion: boolean;
   motivo: string;
   observacionFinal: string;
+  canal?: string;
   hora?: string;
   tipoPersona: TipoPersona | string;
   cc: string;
@@ -679,6 +686,9 @@ export type ContactoLimpio = {
   placa: string;
   anio: string;
   cc: string;
+  agente: string;
+  turnoSlug: string;
+  enCola: number;
   orden: number;
   duplicado: boolean;
   gestion: GestionImportada | null;
@@ -728,6 +738,7 @@ export type ContactoCall = {
   cc: string;
   duplicado: boolean;
   casoId: number | null;
+  origen: string;
   posicion: number;
   total: number;
   pendientes: number;
@@ -764,4 +775,6 @@ export type LlamadaDraft = {
   motivo: string;
   observacionFinal: string;
   agendar: boolean;
+  quedarse?: boolean;
+  sinFicha?: boolean;
 };

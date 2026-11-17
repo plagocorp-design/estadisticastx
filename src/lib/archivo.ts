@@ -67,11 +67,11 @@ export async function prepararParaLeer(file: File) {
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
-  let calidad = 0.82;
+  let calidad = 0.86;
   let blob: Blob | null = null;
-  for (; calidad >= 0.45; calidad -= 0.12) {
+  for (; calidad >= 0.62; calidad -= 0.08) {
     blob = await new Promise((resolve) => canvas.toBlob((item) => resolve(item), "image/jpeg", calidad));
-    if (blob && blob.size <= 380_000) break;
+    if (blob && blob.size <= 700_000) break;
   }
   if (!blob) throw new Error("No pude preparar la foto para leerla");
   const base = file.name.replace(/\.[^.]+$/, "") || "foto";

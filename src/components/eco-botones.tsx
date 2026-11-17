@@ -12,14 +12,7 @@ function nota(boton: HTMLButtonElement, ok: boolean) {
   boton.classList.remove("vl-ok", "vl-mal");
   void boton.offsetWidth;
   boton.classList.add(ok ? "vl-ok" : "vl-mal");
-  const aviso = document.createElement("span");
-  aviso.className = ok ? "vl-nota vl-nota-ok" : "vl-nota vl-nota-mal";
-  aviso.textContent = ok ? "Listo" : "No se guardó";
-  const caja = boton.getBoundingClientRect();
-  aviso.style.left = `${Math.max(8, caja.left)}px`;
-  aviso.style.top = `${Math.max(8, caja.top - 30)}px`;
-  document.body.appendChild(aviso);
-  window.setTimeout(() => aviso.remove(), 1500);
+  window.setTimeout(() => boton.classList.remove("vl-ok", "vl-mal"), 1400);
 }
 
 function fallo(texto: string) {

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { enviarEnTrozos, prepararArchivo } from "@/lib/archivo";
 import {
   CALIFICACIONES,
@@ -9,6 +10,7 @@ import {
   PROXIMAS,
   RESULTADOS,
   META_LLAMADAS,
+  armarSao,
   duracionTexto,
   type ContactoCall,
   type LlamadaDraft,
@@ -37,9 +39,13 @@ import {
   type EmpresaCall,
   type SeguimientoCall,
   type StatsCall,
+  type EfectividadFila,
+  type PlacaDeBase,
+  type CorteCall,
+  type ProcesoStat,
 } from "@/lib/callcenter.functions";
 import type { Me } from "@/lib/casos.functions";
-import { hoyBogota } from "@/lib/casos";
+import { hoyBogota, ORIGENES } from "@/lib/casos";
 import { llevaProcesos } from "@/lib/team.public";
 
 type Tab = "llamar" | "seguimiento" | "bases" | "empresas" | "stats" | "briefing";
@@ -100,7 +106,7 @@ function CargarGestiones({ onError, onListo }: { onError: (t: string) => void; o
   return (
     <div className="rounded-card border border-line bg-card p-4">
       <p className="font-semibold text-navy">Gestiones de un asesor</p>
-      <p className="mt-1 text-xs text-ink-soft">Sube el Excel del asesor, el de la hoja BD. La base original no trae tipificación: este archivo la escribe sobre la misma placa. Si la placa está en la base, la clasificación queda ahí y entra a Estadísticas.</p>
+      <p className="mt-1 text-xs text-ink-soft">Sube el Excel del asesor, el de la hoja BD. La hoja WhatsApp queda como seguimiento de esa placa y no suma en las llamadas de Estadísticas. Si la fila no trae placa (referido o Instagram), no entra.</p>
       <label className={"mt-3 flex h-11 cursor-pointer items-center justify-center rounded-2xl bg-lime text-sm font-semibold text-navy " + (ocupado ? "opacity-60" : "")}>
         {ocupado ? "Escribiendo la tipificación en la base…" : "Cruzar gestiones con la base"}
         <input type="file" accept=".xlsx,.csv,.txt" className="sr-only" disabled={ocupado} onChange={(e) => {
@@ -120,7 +126,7 @@ function CargarGestiones({ onError, onListo }: { onError: (t: string) => void; o
   );
 }
 
-export function CallCenterVista({ me, verEquipo = false, onProceso }: { me: Me; verEquipo?: boolean; onProceso: (id: number) => void }) {
+export function CallCenterVista({ me, verEquipo = false, onProceso, onCerro }: { me: Me; verEquipo?: boolean; onProceso: (id: number) => void; onCerro?: (id: number) => void }) {
   const [tab, setTab] = useState<Tab>("llamar");
   const [resumen, setResumen] = useState<Awaited<ReturnType<typeof resumenCall>> | null>(null);
   const [error, setError] = useState("");
@@ -132,10 +138,10 @@ export function CallCenterVista({ me, verEquipo = false, onProceso }: { me: Me; 
       .catch((err: Error) => setError(err.message));
   }, [tab]);
 
+  const puedeTipificar = resumen?.llama ?? llevaProcesos(me.role);
   const coordina = verEquipo && (resumen?.coordina ?? me.role !== "asesor");
-  const llama = !verEquipo && (resumen?.llama ?? llevaProcesos(me.role));
   const tabs: { id: Tab; label: string }[] = [
-    { id: "llamar", label: verEquipo ? "Colas" : "Llamar" },
+    { id: "llamar", label: "Llamar" },
     { id: "seguimiento", label: "Seguimiento" },
     ...(coordina
       ? [
@@ -154,10 +160,10 @@ export function CallCenterVista({ me, verEquipo = false, onProceso }: { me: Me; 
           <h2 className="text-xl font-semibold text-navy">Call center</h2>
           <p className="text-sm text-ink-soft">
             {resumen
-              ? llama
-                ? `Hoy ${resumen.hoy} de ${META_LLAMADAS}${resumen.hoy >= META_LLAMADAS ? " · meta cumplida" : ` · faltan ${META_LLAMADAS - resumen.hoy}`}`
+              ? puedeTipificar
+                ? `Hoy ${resumen.hoy} de ${META_LLAMADAS}${resumen.hoy >= META_LLAMADAS ? " · meta cumplida" : ` · faltan ${META_LLAMADAS - resumen.hoy}`}. Tu cola tipifica y abre el proceso.`
                 : verEquipo
-                  ? "Ves las colas, el seguimiento y las empresas. Tú no estás tipificando."
+                  ? "Ves la cola y el seguimiento de cada asesor, uno por uno."
                   : `${resumen.activas} empresas activas`
               : "Cargando la cola…"}
           </p>
@@ -180,8 +186,8 @@ export function CallCenterVista({ me, verEquipo = false, onProceso }: { me: Me; 
         {tab === "llamar" ? (
           <Llamar
             me={me}
-            llama={llama}
-            propio={!verEquipo}
+            puedeTipificar={puedeTipificar}
+            verEquipo={verEquipo}
             asesores={resumen?.asesores ?? []}
             onProceso={onProceso}
             onError={setError}
@@ -190,26 +196,40 @@ export function CallCenterVista({ me, verEquipo = false, onProceso }: { me: Me; 
             }
           />
         ) : null}
-        {tab === "seguimiento" ? <Seguimiento llama={llama || verEquipo} onError={setError} /> : null}
+        {tab === "seguimiento" ? (
+          <Seguimiento
+            me={me}
+            verEquipo={verEquipo}
+            asesores={resumen?.asesores ?? []}
+            puedeTipificar={puedeTipificar}
+            onError={setError}
+            onProceso={onProceso}
+            onCerro={onCerro}
+          />
+        ) : null}
         {tab === "bases" && coordina ? <Bases onError={setError} /> : null}
         {tab === "empresas" && coordina ? <Empresas onError={setError} /> : null}
-        {tab === "stats" && coordina ? <Estadisticas onError={setError} /> : null}
+        {tab === "stats" && coordina ? <Estadisticas onError={setError} onProceso={onProceso} /> : null}
         {tab === "briefing" ? <Briefing edita={coordina} onError={setError} /> : null}
       </div>
     </div>
   );
 }
 
-function Llamar({ me, llama, propio, asesores, onProceso, onError, onCola }: { me: Me; llama: boolean; propio: boolean; asesores: AsesorMini[]; onProceso: (id: number) => void; onError: (t: string) => void; onCola: (pendientes: number, hoy: number, segundos: number) => void }) {
-  const [slug, setSlug] = useState(propio ? me.slug : "");
+function Llamar({ me, puedeTipificar, verEquipo, asesores, onProceso, onError, onCola }: { me: Me; puedeTipificar: boolean; verEquipo: boolean; asesores: AsesorMini[]; onProceso: (id: number) => void; onError: (t: string) => void; onCola: (pendientes: number, hoy: number, segundos: number) => void }) {
+  const [slug, setSlug] = useState(puedeTipificar ? me.slug : "");
   const [contacto, setContacto] = useState<ContactoCall | null>(null);
   const [aviso, setAviso] = useState("");
   const [cargando, setCargando] = useState(true);
+  const [cayo, setCayo] = useState(false);
   const [q, setQ] = useState("");
   const [hallados, setHallados] = useState<{ id: number; placa: string; nombre: string; telefono: string; empresa: string; hecho: boolean; dueno?: string }[]>([]);
+  const llama = puedeTipificar && slug === me.slug;
+  const colas = [...asesores].sort((a, b) => (a.slug === me.slug ? -1 : b.slug === me.slug ? 1 : a.name.localeCompare(b.name, "es")));
 
   async function abrir(contactoId = 0, asesor = slug) {
     setCargando(true);
+    setCayo(false);
     try {
       const res = await colaCall({ data: { contactoId, slug: asesor } });
       setContacto(res.contacto);
@@ -217,6 +237,9 @@ function Llamar({ me, llama, propio, asesores, onProceso, onError, onCola }: { m
       setHallados([]);
       if (res.contacto) onCola(res.contacto.pendientes, res.contacto.hoyLlamadas, res.contacto.hoySegundos);
     } catch (err) {
+      setContacto(null);
+      setAviso("");
+      setCayo(true);
       onError(err instanceof Error ? err.message : "No pude abrir la cola");
     } finally {
       setCargando(false);
@@ -224,15 +247,20 @@ function Llamar({ me, llama, propio, asesores, onProceso, onError, onCola }: { m
   }
 
   useEffect(() => {
-    const inicial = propio ? me.slug : (asesores.find((p) => p.slug !== me.slug)?.slug || asesores[0]?.slug || "");
-    if (!slug && inicial) setSlug(inicial);
+    const inicial = puedeTipificar ? me.slug : (asesores.find((p) => p.slug !== me.slug)?.slug || asesores[0]?.slug || "");
+    if (inicial && inicial !== slug) setSlug(inicial);
     void abrir(0, inicial || slug);
-  }, [asesores.length, propio]);
+  }, [asesores.length, verEquipo]);
+
+  function volverAMi() {
+    setSlug(me.slug);
+    void abrir(0, me.slug);
+  }
 
   return (
     <div>
     <div>
-      {!propio ? (
+      {verEquipo ? (
         <label className="mb-3 block text-sm">
           Ver la cola de
           <select
@@ -240,9 +268,13 @@ function Llamar({ me, llama, propio, asesores, onProceso, onError, onCola }: { m
             onChange={(e) => { setSlug(e.target.value); void abrir(0, e.target.value); }}
             className="mt-1 h-11 w-full rounded-2xl border border-line px-3"
           >
-            {asesores.map((p) => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+            {colas.map((p) => <option key={p.slug} value={p.slug}>{p.slug === me.slug ? `${p.name} (mi cola)` : p.name}</option>)}
           </select>
-          <span className="mt-1 block text-xs text-ink-soft">Cada placa es de una sola persona. Esta cola no comparte contactos con las demás.</span>
+          <span className="mt-1 block text-xs text-ink-soft">
+            {llama
+              ? "Estás en tu cola. Aquí se guarda la tipificación y se abre el proceso en Procesos."
+              : "Esta cola es de otra persona: solo lectura. Cada placa es de un solo asesor."}
+          </span>
         </label>
       ) : <p className="mb-3 text-xs text-ink-soft">Tu cola es solo tuya. La misma placa no le sale a otro asesor.</p>}
       <div className="flex gap-2">
@@ -282,7 +314,7 @@ function Llamar({ me, llama, propio, asesores, onProceso, onError, onCola }: { m
         </ul>
       ) : null}
       {cargando ? <p className="mt-4 text-sm text-ink-soft">Abriendo el siguiente…</p> : null}
-      {!cargando && !contacto ? <p className="mt-4 rounded-card border border-line bg-card p-4 text-sm">{aviso || "No hay contactos en la cola."}</p> : null}
+      {!cargando && !contacto && !cayo ? <p className="mt-4 rounded-card border border-line bg-card p-4 text-sm">{aviso || "No hay contactos en la cola."}</p> : null}
       {contacto ? (
         <Ficha
           key={contacto.id}
@@ -298,6 +330,7 @@ function Llamar({ me, llama, propio, asesores, onProceso, onError, onCola }: { m
           }}
           onProceso={onProceso}
           onError={onError}
+          onVolver={puedeTipificar && !llama ? volverAMi : undefined}
         />
       ) : null}
     </div>
@@ -306,8 +339,25 @@ function Llamar({ me, llama, propio, asesores, onProceso, onError, onCola }: { m
   );
 }
 
+function cuentaComo(clasificacion: string, intencion: string, resultado: string) {
+  const partes: string[] = [];
+  const clas = clasificacion.toLowerCase();
+  const inten = intencion.toLowerCase();
+  const res = resultado.toLowerCase();
+  if (clas.includes("efectivo") && !clas.includes("no efectivo")) partes.push("Contestó");
+  if (inten.includes("no interesado")) partes.push("No interesado");
+  if (inten.includes("considera")) partes.push("Considera opción");
+  if (inten.includes("quiere")) partes.push("Quiere afiliarse");
+  if (res.includes("no afiliado")) partes.push("No afiliado");
+  else if (res === "afiliado") partes.push("Afiliado");
+  if (res.includes("no localizado")) partes.push("No localizado");
+  if (res === "en proceso") partes.push("En proceso de afiliación");
+  else if (resultado && res !== "afiliado" && !res.includes("no afiliado") && !res.includes("no localizado")) partes.push(resultado);
+  return partes;
+}
+
 function Ficha({
-  contacto, llama, aviso, onAviso, onIr, onGuardado, onProceso, onError,
+  contacto, llama, aviso, onAviso, onIr, onGuardado, onProceso, onError, onVolver,
 }: {
   contacto: ContactoCall;
   llama: boolean;
@@ -315,8 +365,9 @@ function Ficha({
   onAviso: (t: string) => void;
   onIr: (id: number) => void;
   onGuardado: (c: ContactoCall | null, aviso: string) => void;
-  onProceso: (id: number) => void;
+  onProceso: (id: number) => void | Promise<void>;
   onError: (t: string) => void;
+  onVolver?: () => void;
 }) {
   const g = contacto.gestion;
   const tipoInicial: TipoPersona = g?.tipoPersona === "propietario" || g?.tipoPersona === "desconocido" ? g.tipoPersona : "conductor";
@@ -341,8 +392,10 @@ function Ficha({
   const [noAplicaAfiliacion, setNoAplicaAfiliacion] = useState(Boolean(g?.noAplicaAfiliacion));
   const [motivo, setMotivo] = useState(g?.motivo || "");
   const [observacionFinal, setObservacionFinal] = useState(g?.observacionFinal || "");
+  const [origen, setOrigen] = useState((ORIGENES as readonly string[]).includes(contacto.origen) ? contacto.origen : "Base de datos (Call)");
+  const [fallo, setFallo] = useState("");
   const [segundos, setSegundos] = useState(0);
-  const [guardando, setGuardando] = useState(false);
+  const [guardando, setGuardando] = useState<"guardar" | "abrir" | "">("");
   const inicio = useRef(Date.now());
   const rec = useRef<Voz | null>(null);
   const [mic, setMic] = useState("");
@@ -407,10 +460,8 @@ function Ficha({
     reconocimiento.start();
   }
 
-  async function guardar() {
-    if (!llama) return;
-    setGuardando(true);
-    const draft: LlamadaDraft = {
+  function draftDe(quedarse: boolean, resultadoForzado = resultado): LlamadaDraft {
+    return {
       contactoId: contacto.id,
       segundos,
       tipoPersona: tipo,
@@ -431,30 +482,68 @@ function Ficha({
       proxima,
       fechaProxima,
       noAplicaProxima,
-      resultado,
+      resultado: resultadoForzado,
       fechaAfiliacion,
       noAplicaAfiliacion,
       motivo,
       observacionFinal,
       agendar: Boolean(fechaProxima) && !noAplicaProxima,
+      quedarse,
     };
+  }
+
+  async function guardar() {
+    if (!llama) return;
+    setFallo("");
+    if (!clasificacion || !calificacion) {
+      setFallo("Faltan la clasificación y la calificación. Sin eso no entra a la tabla.");
+      return;
+    }
+    setGuardando("guardar");
     try {
-      const res = await guardarLlamada({ data: draft });
+      const res = await guardarLlamada({ data: draftDe(false) });
       onGuardado(res.contacto, res.aviso);
     } catch (err) {
-      onError(err instanceof Error ? err.message : "No pude guardar");
+      const texto = err instanceof Error ? err.message : "No pude guardar";
+      setFallo(texto);
+      onError(texto);
     } finally {
-      setGuardando(false);
+      setGuardando("");
     }
   }
 
   async function abrir() {
+    if (!llama) return;
+    setFallo("");
+    const telLimpio = (tel || contacto.telefonoLista).replace(/\D/g, "");
+    const faltan: string[] = [];
+    if (!clasificacion) faltan.push("clasificación");
+    if (!calificacion) faltan.push("calificación");
+    if (!contacto.placa) faltan.push("placa");
+    if (!cc.replace(/\D/g, "")) faltan.push("cédula");
+    if (nombre.trim().length < 3) faltan.push("nombre");
+    if (telLimpio.length < 7) faltan.push("teléfono");
+    if (faltan.length) {
+      setFallo(`Para abrir el proceso falta: ${faltan.join(", ")}.`);
+      return;
+    }
+    const resultadoAbrir = resultado || "En proceso";
+    if (!resultado) setResultado("En proceso");
+    setGuardando("abrir");
     try {
-      const res = await abrirProcesoCall({ data: { contactoId: contacto.id, nombre, cc, telefono: tel || contacto.telefonoLista } });
+      const res = await guardarLlamada({ data: draftDe(true, resultadoAbrir) });
       onAviso(res.aviso);
-      if (res.casoId) onProceso(res.casoId);
+      const abierto = await abrirProcesoCall({
+        data: { contactoId: contacto.id, nombre, cc, telefono: tel || contacto.telefonoLista, origen },
+      });
+      onAviso(abierto.aviso);
+      if (abierto.casoId) await onProceso(abierto.casoId);
     } catch (err) {
-      onError(err instanceof Error ? err.message : "No pude abrir el proceso");
+      const texto = err instanceof Error ? err.message : "No pude abrir el proceso";
+      setFallo(texto);
+      onError(texto);
+    } finally {
+      setGuardando("");
     }
   }
 
@@ -531,6 +620,7 @@ function Ficha({
       </label>
 
       <div className="mt-3 grid gap-3 rounded-card border border-line bg-card p-4 sm:grid-cols-2">
+        <Select label="De dónde salió el contacto" value={origen} opciones={ORIGENES} onChange={setOrigen} disabled={!llama} />
         <Select label="Clasificación" value={clasificacion} opciones={CLASIFICACIONES} onChange={setClasificacion} disabled={!llama} />
         <Select label="Calificación" value={calificacion} opciones={CALIFICACIONES} onChange={setCalificacion} disabled={!llama} />
       </div>
@@ -559,19 +649,34 @@ function Ficha({
 
       <div className="mt-3 rounded-card border border-line bg-card p-4">
         <Nota label="Observación final" value={observacionFinal} onChange={setObservacionFinal} disabled={!llama} chips={CHIPS.observacionFinal} onChip={(t) => chip("observacionFinal", t)} />
+        <p className="mt-3 text-xs text-ink-soft">Observación SAO, se guarda sola: {armarSao({ tipoPersona: tipo, nombre, cc, tel, tieneNuevo, nuevoNombre, nuevoTel })}</p>
       </div>
 
       {llama ? (
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <button type="button" disabled={guardando} onClick={() => void guardar()} className="h-12 rounded-2xl bg-navy font-semibold text-paper disabled:opacity-60">
-            {guardando ? "Guardando…" : "Guardar y pasar al siguiente"}
-          </button>
-          <button type="button" onClick={() => void abrir()} className="h-12 rounded-2xl border border-line bg-card font-semibold">
-            {contacto.casoId ? "Abrir el proceso" : "Abrirle proceso"}
-          </button>
+        <div className="fixed inset-x-0 bottom-16 z-50 border-t border-line bg-paper/95 px-4 py-3 backdrop-blur lg:bottom-0 lg:left-[15rem]">
+          {fallo ? <p className="mx-auto mb-2 max-w-3xl text-sm text-danger">{fallo}</p> : null}
+          <p className="mx-auto mb-2 max-w-3xl text-xs text-ink-soft">
+            {cuentaComo(clasificacion, intencion, resultado || (guardando === "abrir" ? "En proceso" : "")).length
+              ? `En la tabla de efectividad cuenta como: ${cuentaComo(clasificacion, intencion, resultado).join(" · ")}.`
+              : "Elige clasificación, calificación e intención para que esta llamada cuente en la tabla."}
+            {` Origen: ${origen}.`}
+          </p>
+          <div className="mx-auto grid max-w-3xl gap-2 sm:grid-cols-2">
+            <button type="button" disabled={guardando !== ""} onClick={() => void guardar()} className="h-12 rounded-2xl bg-navy font-semibold text-paper disabled:opacity-60">
+              {guardando === "guardar" ? "Guardando…" : "Guardar y pasar al siguiente"}
+            </button>
+            <button type="button" disabled={guardando !== ""} onClick={() => void abrir()} className="h-12 rounded-2xl bg-lime font-semibold text-navy disabled:opacity-60">
+              {guardando === "abrir" ? "Abriendo el proceso…" : "Abrir proceso"}
+            </button>
+          </div>
         </div>
-      ) : <p className="mt-3 text-sm text-ink-soft">La tipificación la guarda el asesor. Desde aquí se revisa la cola.</p>}
-      <p className="mt-2 text-xs text-ink-soft">Si la próxima gestión es WhatsApp, queda en Control sin cerrar las llamadas, y la bitácora del día se llena sola. Si hay fecha, también queda en la agenda.</p>
+      ) : (
+        <div className="mt-3 rounded-card border border-line bg-card p-4 text-sm">
+          <p>{onVolver ? "Esta cola no es tuya. Vuelve a la tuya para guardar la llamada y abrir el proceso." : "La tipificación la guarda el asesor. Desde aquí se revisa la cola."}</p>
+          {onVolver ? <button type="button" onClick={onVolver} className="mt-3 h-11 rounded-2xl bg-navy px-4 font-semibold text-paper">Ir a mi cola</button> : null}
+        </div>
+      )}
+      <p className="mt-2 pb-48 text-xs text-ink-soft">Si la próxima gestión es WhatsApp, queda en Control sin cerrar las llamadas, y la bitácora del día se llena sola. Si hay fecha, también queda en la agenda. Abrir proceso guarda esta tipificación y abre el proceso en Procesos. Si el resultado es No afiliado o No localizado, o la próxima gestión es Cerrar, el proceso se cierra.</p>
     </div>
   );
 }
@@ -652,7 +757,7 @@ function Bases({ onError }: { onError: (t: string) => void }) {
             .finally(() => setOcupado(false));
         }} />
       </label>
-      <p className="mt-2 text-xs text-ink-soft">La base original solo trae placa, nombre, teléfono y empresa. No trae clasificación. Después, en «Cruzar gestiones con la base», sube el Excel de cada asesor para escribir la tipificación sobre esas placas.</p>
+      <p className="mt-2 text-xs text-ink-soft">Primero sube BASE COMPLETA, la hoja Base ORIGINAL: de ahí sale todo. No prende la cola ni reparte las placas. La primera hoja de ese archivo es solo ALO TAXIS; se usa la grande. Después sube BASE PARA GESTION DE LLAMADAS: su primera hoja también es solo ALO TAXIS. La segunda, BASE PARA GESTION LLAMADAS, trae la columna AGENTE y es la cola (un pedazo de la completa, no el parque entero). Si AGENTE está vacío, esa placa no entra a la cola. El Excel de cada asesor se cruza en «Cruzar gestiones con la base».</p>
       {aviso ? <p className="mt-2 text-sm">{aviso}</p> : null}
       <ul className="mt-4 grid gap-2">
         {bases.map((base) => (
@@ -734,23 +839,175 @@ function tituloMes(mes: string) {
   return `${NOMBRE_MES[Number(numero)] || mes} ${anio}`;
 }
 
+const CLAVES_EFECTO = ["contesto", "noInteresado", "considera", "quiere", "enProceso", "noAfiliado", "noLocalizado", "afiliado", "procesosAbiertos", "vinculados"] as const;
+
+const COLUMNAS_EFECTO: { clave: (typeof CLAVES_EFECTO)[number]; label: string }[] = [
+  { clave: "contesto", label: "Contestó" },
+  { clave: "noInteresado", label: "No interesado" },
+  { clave: "considera", label: "Considera opción" },
+  { clave: "quiere", label: "Quiere afiliarse" },
+  { clave: "enProceso", label: "En proceso" },
+  { clave: "noAfiliado", label: "No afiliado" },
+  { clave: "noLocalizado", label: "No localizado" },
+  { clave: "afiliado", label: "Afiliado" },
+  { clave: "procesosAbiertos", label: "Abiertos Call" },
+  { clave: "vinculados", label: "Vinculados Call" },
+];
+
+function sumarEfectividad(lista: { efectividad?: EfectividadFila[] }[]) {
+  const mapa = new Map<string, EfectividadFila>();
+  for (const mes of lista) {
+    for (const fila of mes.efectividad ?? []) {
+      const actual = mapa.get(fila.nombre) ?? {
+        nombre: fila.nombre, contesto: 0, noInteresado: 0, considera: 0, quiere: 0, enProceso: 0, noAfiliado: 0, noLocalizado: 0, afiliado: 0, procesosAbiertos: 0, vinculados: 0,
+      };
+      for (const clave of CLAVES_EFECTO) actual[clave] += fila[clave] || 0;
+      mapa.set(fila.nombre, actual);
+    }
+  }
+  return [...mapa.values()].sort((a, b) => b.contesto - a.contesto || b.vinculados - a.vinculados);
+}
+
+function TablaEfectividad({ filas }: { filas: EfectividadFila[] }) {
+  const total = (clave: (typeof CLAVES_EFECTO)[number]) => filas.reduce((suma, fila) => suma + (fila[clave] || 0), 0);
+  return (
+    <div className="mt-3 overflow-x-auto rounded-card border border-line bg-card">
+      <table className="w-full min-w-[64rem] text-sm">
+        <thead>
+          <tr className="border-b border-line text-left text-xs text-ink-soft">
+            <th className="px-3 py-2 font-semibold">Asesor</th>
+            {COLUMNAS_EFECTO.map((col) => <th key={col.clave} className="px-3 py-2 font-semibold">{col.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {filas.length === 0 ? <tr><td colSpan={11} className="px-3 py-3 text-ink-soft">Todavía no hay gestiones para esta tabla.</td></tr> : null}
+          {filas.map((fila) => (
+            <tr key={fila.nombre} className="border-b border-line last:border-0">
+              <td className="px-3 py-2 font-semibold">{fila.nombre}</td>
+              {COLUMNAS_EFECTO.map((col) => (
+                <td key={col.clave} className={"px-3 py-2 " + (col.clave === "afiliado" || col.clave === "vinculados" ? "font-semibold text-navy" : "")}>{fila[col.clave]}</td>
+              ))}
+            </tr>
+          ))}
+          {filas.length > 0 ? (
+            <tr>
+              <td className="px-3 py-2 font-semibold">Total</td>
+              {COLUMNAS_EFECTO.map((col) => <td key={col.clave} className="px-3 py-2 font-semibold">{total(col.clave)}</td>)}
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function finDeMes(mes: string) {
   const [anio, numero] = mes.split("-").map(Number);
   const dia = new Date(Date.UTC(anio, numero, 0)).getUTCDate();
   return `${mes}-${String(dia).padStart(2, "0")}`;
 }
 
-function Estadisticas({ onError }: { onError: (t: string) => void }) {
+function PlacasBase({ placas, campana, mes, onProceso }: { placas: PlacaDeBase[]; campana: boolean; mes: string; onProceso: (id: number) => void }) {
+  const [q, setQ] = useState("");
+  const [estado, setEstado] = useState("");
+  const base = placas.filter((fila) => campana || fila.fecha.slice(0, 7) === mes);
+  const texto = q.trim().toLowerCase();
+  const lista = base.filter((fila) => {
+    if (estado && fila.estado !== estado && !(estado === "Llamar" && fila.desde === "Llamar")) return false;
+    if (!texto) return true;
+    return `${fila.placa} ${fila.nombre} ${fila.asesor} ${fila.empresa}`.toLowerCase().includes(texto);
+  });
+  const vinculados = base.filter((fila) => fila.estado === "Vinculado").length;
+  const abiertos = base.filter((fila) => fila.estado === "Abierto").length;
+  const desdeLlamar = base.filter((fila) => fila.desde === "Llamar").length;
+  return (
+    <div className="mt-4">
+      <p className="font-semibold text-navy">Procesos que salieron de la llamada</p>
+      <p className="mt-1 text-sm text-ink-soft">
+        {base.length} placas. {vinculados} vinculadas, {abiertos} abiertas. {desdeLlamar} se abrieron con el botón de Llamar; el resto tiene origen Base de datos (Call). Un referido, un trabajo de campo o un proceso de otra vía no entra, aunque la placa esté en la base.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar placa, asesor o empresa" className="h-11 min-w-0 flex-1 rounded-2xl border border-line px-3" />
+        {["", "Vinculado", "Abierto", "Cerrado", "Llamar"].map((opcion) => (
+          <button key={opcion || "todas"} type="button" onClick={() => setEstado(opcion)} className={"h-11 rounded-2xl px-3 text-sm font-semibold " + (estado === opcion ? "bg-navy text-paper" : "border border-line bg-card")}>
+            {opcion || "Todas"}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 overflow-x-auto rounded-card border border-line bg-card">
+        <table className="w-full min-w-[52rem] text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-ink-soft">
+              <th className="px-3 py-2 font-semibold">Placa</th>
+              <th className="px-3 py-2 font-semibold">Propietario</th>
+              <th className="px-3 py-2 font-semibold">Asesor</th>
+              <th className="px-3 py-2 font-semibold">Empresa</th>
+              <th className="px-3 py-2 font-semibold">Estado</th>
+              <th className="px-3 py-2 font-semibold">Cómo se abrió</th>
+              <th className="px-3 py-2 font-semibold">Origen</th>
+              <th className="px-3 py-2 font-semibold">Fecha</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lista.length === 0 ? <tr><td colSpan={8} className="px-3 py-3 text-ink-soft">Ningún proceso de llamada coincide{texto || estado ? " con ese filtro" : ""}.</td></tr> : null}
+            {lista.map((fila) => (
+              <tr key={fila.casoId} className="border-b border-line last:border-0">
+                <td className="px-3 py-2">
+                  <button type="button" onClick={() => onProceso(fila.casoId)} className="font-semibold text-navy">{fila.placa || "Sin placa"}</button>
+                </td>
+                <td className="px-3 py-2">{fila.nombre}</td>
+                <td className="px-3 py-2 font-semibold">{fila.asesor}</td>
+                <td className="px-3 py-2">{fila.empresa}</td>
+                <td className="px-3 py-2">{fila.estado}</td>
+                <td className="px-3 py-2">{fila.desde}</td>
+                <td className="px-3 py-2">{fila.origen || "—"}</td>
+                <td className="px-3 py-2">{fila.fecha}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Barras({ titulo, nota, filas }: { titulo: string; nota?: string; filas: { nombre: string; valor: number; extra?: string }[] }) {
+  const tope = Math.max(1, ...filas.map((fila) => fila.valor));
+  return (
+    <section className="rounded-card border border-line bg-card p-4">
+      <p className="font-semibold text-navy">{titulo}</p>
+      {nota ? <p className="mt-1 text-xs text-ink-soft">{nota}</p> : null}
+      <ul className="mt-3 grid gap-2">
+        {filas.length === 0 ? <li className="text-sm text-ink-soft">Sin datos en este mes.</li> : null}
+        {filas.slice(0, 8).map((fila) => (
+          <li key={fila.nombre}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="min-w-0 truncate">{fila.nombre}</span>
+              <span className="shrink-0 font-semibold tabular-nums">{fila.extra || fila.valor}</span>
+            </div>
+            <div className="mt-1 h-2 overflow-hidden rounded-full bg-paper">
+              <div className="h-full rounded-full bg-navy" style={{ width: `${Math.max(fila.valor ? 6 : 0, Math.round((fila.valor / tope) * 100))}%` }} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Estadisticas({ onError, onProceso }: { onError: (t: string) => void; onProceso: (id: number) => void }) {
   const hoy = hoyBogota();
   const [mes, setMes] = useState(hoy.slice(0, 7));
   const [dia, setDia] = useState(hoy);
   const [stats, setStats] = useState<StatsCall | null>(null);
+  const [campana, setCampana] = useState(true);
   function cargar(diaSel = dia) {
     statsCall({ data: { dia: diaSel } }).then(setStats).catch((err: Error) => onError(err.message));
   }
   useEffect(() => { cargar(); }, []);
-  const meses = stats?.meses ?? [];
+  const meses = (stats?.meses ?? []).filter((item) => /^\d{4}-\d{2}$/.test(item.mes));
   const vista = meses.find((item) => item.mes === mes) ?? meses[meses.length - 1];
+  const efectividad = sumarEfectividad(campana ? (stats?.meses ?? []) : vista ? [vista] : []);
   const nombres = [...new Set(meses.flatMap((item) => item.porAsesor.map((row) => row.nombre)))];
   nombres.sort((a, b) => {
     const total = (nombre: string) => meses.reduce((suma, item) => suma + (item.porAsesor.find((row) => row.nombre === nombre)?.total ?? 0), 0);
@@ -762,12 +1019,25 @@ function Estadisticas({ onError }: { onError: (t: string) => void }) {
     <div>
       <CargarGestiones onError={onError} onListo={() => cargar(dia)} />
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-ink-soft">Todas las llamadas, aunque la empresa esté apagada. {granTotal} en total.</p>
-        <button type="button" className="h-10 rounded-2xl border border-line bg-card px-4 text-sm font-semibold" disabled={!vista} onClick={() => {
-          if (!vista) return;
-          const hasta = vista.mes === hoy.slice(0, 7) ? hoy : finDeMes(vista.mes);
-          exportarCall({ data: { desde: `${vista.mes}-01`, hasta } }).then((file) => bajarExcel(file.base64, file.filename)).catch((err: Error) => onError(err.message));
-        }}>Exportar {vista ? tituloMes(vista.mes) : "Excel"}</button>
+        <p className="text-sm text-ink-soft">Solo las llamadas tipificadas en la hoja BD. El WhatsApp no suma. Si ya está la base completa o la de gestión, la placa tiene que existir ahí. {granTotal} en total. El 0:00 es porque el Excel no trae duración: el tiempo solo se cuenta en las llamadas hechas desde la app.</p>
+        <button type="button" className="h-10 rounded-2xl border border-line bg-card px-4 text-sm font-semibold" disabled={!vista && !campana} onClick={() => {
+          const desde = campana && meses[0] ? `${meses[0].mes}-01` : vista ? `${vista.mes}-01` : `${hoy.slice(0, 7)}-01`;
+          const hasta = campana || !vista ? hoy : vista.mes === hoy.slice(0, 7) ? hoy : finDeMes(vista.mes);
+          exportarCall({ data: { desde, hasta } }).then((file) => bajarExcel(file.base64, file.filename)).catch((err: Error) => onError(err.message));
+        }}>{campana ? "Exportar campaña" : `Exportar ${vista ? tituloMes(vista.mes) : "Excel"}`}</button>
+      </div>
+      <div className="mt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold text-navy">Efectividad por asesor</p>
+          <button type="button" onClick={() => setCampana((v) => !v)} className="h-10 rounded-2xl border border-line bg-card px-4 text-sm font-semibold">
+            {campana ? `Ver ${vista ? tituloMes(vista.mes) : "el mes"}` : "Ver toda la campaña"}
+          </button>
+        </div>
+        <p className="mt-1 text-sm text-ink-soft">
+          La misma tabla de la hoja de coordinación. Contestó es contacto efectivo. No interesado, considera opción y quiere afiliarse salen de la intención. En proceso, no afiliado, no localizado y afiliado salen del resultado. Abiertos y vinculados de la base son procesos cuya placa está en la base de llamadas, aunque los hayan abierto en Nuevo seguimiento. El asesor es quien tiene el proceso. Vinculado es el que ya se completó o ya entregó la tarjeta.
+        </p>
+        <TablaEfectividad filas={efectividad} />
+        <PlacasBase placas={stats?.placas ?? []} campana={campana} mes={vista?.mes ?? mes} onProceso={onProceso} />
       </div>
       {meses.length > 0 ? (
         <div className="mt-3 overflow-x-auto rounded-card border border-line bg-card">
@@ -869,7 +1139,9 @@ function Bloque({ titulo, children }: { titulo: string; children: ReactNode }) {
   );
 }
 
-function Seguimiento({ llama, onError }: { llama: boolean; onError: (t: string) => void }) {
+function Seguimiento({ me, verEquipo, asesores, puedeTipificar, onError, onProceso, onCerro }: { me: Me; verEquipo: boolean; asesores: AsesorMini[]; puedeTipificar: boolean; onError: (t: string) => void; onProceso: (id: number) => void; onCerro?: (id: number) => void }) {
+  const inicial = puedeTipificar ? me.slug : (asesores[0]?.slug || me.slug);
+  const [slug, setSlug] = useState(inicial);
   const [filas, setFilas] = useState<SeguimientoCall[]>([]);
   const [abierta, setAbierta] = useState<number | null>(null);
   const [clasificacion, setClasificacion] = useState("");
@@ -879,11 +1151,21 @@ function Seguimiento({ llama, onError }: { llama: boolean; onError: (t: string) 
   const [resultado, setResultado] = useState("");
   const [nota, setNota] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [abriendo, setAbriendo] = useState(false);
+  const [aviso, setAviso] = useState("");
+  const [fallo, setFallo] = useState("");
+  const edita = puedeTipificar && slug === me.slug;
+  const colas = [...asesores].sort((a, b) => (a.slug === me.slug ? -1 : b.slug === me.slug ? 1 : a.name.localeCompare(b.name, "es")));
+  const dueno = colas.find((p) => p.slug === slug)?.name || me.name;
 
-  function cargar() {
-    listSeguimiento().then(setFilas).catch((err: Error) => onError(err.message));
+  function cargar(asesor = slug) {
+    listSeguimiento({ data: { slug: asesor } }).then(setFilas).catch((err: Error) => onError(err.message));
   }
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    const siguiente = puedeTipificar ? me.slug : (asesores[0]?.slug || me.slug);
+    if (siguiente && siguiente !== slug) setSlug(siguiente);
+    cargar(siguiente);
+  }, [asesores.length]);
 
   function abrir(fila: SeguimientoCall) {
     setAbierta(fila.id);
@@ -896,10 +1178,12 @@ function Seguimiento({ llama, onError }: { llama: boolean; onError: (t: string) 
   }
 
   async function guardar(fila: SeguimientoCall) {
-    if (!llama) return;
+    if (!edita) return;
     setGuardando(true);
+    setAviso("");
+    setFallo("");
     try {
-      await guardarLlamada({
+      const res = await guardarLlamada({
         data: {
           contactoId: fila.id,
           segundos: 0,
@@ -925,44 +1209,107 @@ function Seguimiento({ llama, onError }: { llama: boolean; onError: (t: string) 
           motivo: "",
           observacionFinal: nota,
           agendar: false,
+          quedarse: true,
+          sinFicha: true,
         },
       });
+      setAviso(res.aviso);
+      if (res.cerradoId) onCerro?.(res.cerradoId);
       setAbierta(null);
       cargar();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "No pude actualizar la gestión");
+      const texto = err instanceof Error ? err.message : "No pude actualizar la gestión";
+      setFallo(texto);
+      onError(texto);
     } finally {
       setGuardando(false);
     }
   }
 
+  async function abrirProceso(fila: SeguimientoCall) {
+    if (fila.casoId) {
+      try {
+        await onProceso(fila.casoId);
+      } catch (err) {
+        onError(err instanceof Error ? err.message : "No pude abrir el proceso");
+      }
+      return;
+    }
+    if (!edita) return;
+    setAbriendo(true);
+    try {
+      const res = await abrirProcesoCall({
+        data: {
+          contactoId: fila.id,
+          nombre: fila.nombre || fila.propietario,
+          cc: fila.cc,
+          telefono: fila.telefono || fila.telPropietario,
+          origen: "Base de datos (Call)",
+        },
+      });
+      if (res.casoId) await onProceso(res.casoId);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No pude abrir el proceso");
+    } finally {
+      setAbriendo(false);
+    }
+  }
+
   const atrasadas = filas.filter((fila) => fila.atrasada).length;
+  const enProceso = filas.filter((fila) => fila.resultado.toLowerCase() === "en proceso").length;
+  const quiere = filas.filter((fila) => /quiere/i.test(fila.intencion)).length;
   return (
     <div>
+      {verEquipo ? (
+        <label className="mb-3 block text-sm">
+          Seguimientos de
+          <select
+            value={slug}
+            onChange={(e) => { setSlug(e.target.value); setAbierta(null); cargar(e.target.value); }}
+            className="mt-1 h-11 w-full rounded-2xl border border-line px-3"
+          >
+            {colas.map((p) => <option key={p.slug} value={p.slug}>{p.slug === me.slug ? `${p.name} (míos)` : p.name}</option>)}
+          </select>
+        </label>
+      ) : null}
       <p className="text-sm text-ink-soft">
-        Contactos efectivos o que quedaron en WhatsApp, por llamar o en proceso. Si llevan más de una semana sin una tipificación nueva, salen para actualizar.
-        {atrasadas ? ` ${atrasadas} de esta semana.` : ""}
+        Solo los de {dueno.split(" ")[0]}. No se mezclan con los de otro asesor. Efectivos, WhatsApp, por llamar o en proceso.
+        {atrasadas ? ` ${atrasadas} llevan más de una semana.` : ""}
+        {filas.length ? ` ${enProceso} en proceso de afiliación · ${quiere} quieren afiliarse.` : ""}
       </p>
+      {aviso ? <p className="mt-2 text-sm font-semibold text-navy">{aviso}</p> : null}
       <ul className="mt-3 grid gap-2">
-        {filas.length === 0 ? <li className="rounded-card border border-line bg-card p-4 text-sm">No hay gestiones abiertas.</li> : null}
+        {filas.length === 0 ? <li className="rounded-card border border-line bg-card p-4 text-sm">No hay seguimientos abiertos de {dueno.split(" ")[0]}.</li> : null}
         {filas.map((fila) => (
           <li key={fila.id} className={"rounded-card border bg-card p-4 " + (fila.atrasada ? "border-danger" : "border-line")}>
             <button type="button" className="w-full text-left" onClick={() => abrir(fila)}>
               <p className="font-semibold text-navy">{fila.placa || "Sin placa"} · {fila.nombre || "Sin nombre"}</p>
               <p className="mt-1 text-sm text-ink-soft">{fila.empresa} · {fila.clasificacion || "Sin clasificación"} · {fila.proxima || "sin próxima"}{fila.resultado ? ` · ${fila.resultado}` : ""}</p>
-              <p className={"mt-1 text-xs font-semibold " + (fila.atrasada ? "text-danger" : "text-ink-soft")}>{fila.fecha} · {fila.asesor.split(" ")[0]}{fila.atrasada ? " · toca actualizar esta semana" : " · al día"}</p>
+              <p className={"mt-1 text-xs font-semibold " + (fila.atrasada ? "text-danger" : "text-ink-soft")}>
+                {fila.fecha} · {fila.asesor.split(" ")[0]}{fila.origen ? ` · ${fila.origen}` : " · sin origen en el proceso"}{fila.casoId ? " · proceso abierto" : ""}{fila.atrasada ? " · toca actualizar" : " · al día"}
+              </p>
             </button>
-            {abierta === fila.id && llama ? (
+            {abierta === fila.id ? (
               <div className="mt-3 grid gap-2">
-                <Select label="Clasificación" value={clasificacion} opciones={CLASIFICACIONES} onChange={setClasificacion} />
-                <Select label="Calificación" value={calificacion} opciones={CALIFICACIONES} onChange={setCalificacion} />
-                <Select label="Intención" value={intencion} opciones={INTENCIONES} onChange={setIntencion} />
-                <Select label="Próxima gestión" value={proxima} opciones={PROXIMAS} onChange={setProxima} />
-                <Select label="Resultado" value={resultado} opciones={RESULTADOS} onChange={setResultado} />
-                <textarea value={nota} onChange={(e) => setNota(e.target.value)} rows={2} placeholder="Qué pasó en este seguimiento" className="rounded-2xl border border-line px-3 py-2 text-sm" />
-                <button type="button" disabled={guardando} onClick={() => void guardar(fila)} className="h-11 rounded-2xl bg-navy font-semibold text-paper disabled:opacity-60">
-                  {guardando ? "Guardando…" : "Guardar seguimiento"}
-                </button>
+                {edita ? (
+                  <>
+                    <Select label="Clasificación" value={clasificacion} opciones={CLASIFICACIONES} onChange={setClasificacion} />
+                    <Select label="Calificación" value={calificacion} opciones={CALIFICACIONES} onChange={setCalificacion} />
+                    <Select label="Intención" value={intencion} opciones={INTENCIONES} onChange={setIntencion} />
+                    <Select label="Próxima gestión" value={proxima} opciones={PROXIMAS} onChange={setProxima} />
+                    <Select label="Resultado" value={resultado} opciones={RESULTADOS} onChange={setResultado} />
+                    <textarea value={nota} onChange={(e) => setNota(e.target.value)} rows={2} placeholder="Qué pasó en este seguimiento" className="rounded-2xl border border-line px-3 py-2 text-sm" />
+                    {fallo ? <p className="text-sm text-danger">{fallo}</p> : null}
+                    <button type="button" disabled={guardando} onClick={() => void guardar(fila)} className="h-11 rounded-2xl bg-navy font-semibold text-paper disabled:opacity-60">
+                      {guardando ? "Guardando…" : /no afiliado|no localizado/i.test(resultado) || proxima.trim().toLowerCase() === "cerrar" ? "Guardar y cerrar el proceso" : "Guardar seguimiento"}
+                    </button>
+                  </>
+                ) : <p className="text-sm text-ink-soft">Este seguimiento es de {fila.asesor.split(" ")[0]}. Solo esa persona lo actualiza.</p>}
+                {edita || fila.casoId ? (
+                  <button type="button" disabled={abriendo} onClick={() => void abrirProceso(fila)} className="h-11 rounded-2xl bg-lime font-semibold text-navy disabled:opacity-60">
+                    {abriendo ? "Abriendo el proceso…" : "Abrir proceso"}
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </li>
@@ -1020,7 +1367,7 @@ function cajaGuion(): CajaGuion {
 
 function GuionFlotante({ onError }: { onError: (t: string) => void }) {
   const [caja, setCaja] = useState<CajaGuion>(cajaGuion);
-  const [oculto, setOculto] = useState(false);
+  const [oculto, setOculto] = useState(() => typeof window !== "undefined" && window.innerWidth < 1024);
   const cajaRef = useRef(caja);
   cajaRef.current = caja;
   useEffect(() => {
@@ -1058,7 +1405,7 @@ function GuionFlotante({ onError }: { onError: (t: string) => void }) {
 
   if (oculto) {
     return (
-      <button type="button" onClick={() => setOculto(false)} className="fixed bottom-4 right-4 z-40 h-11 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper shadow-lg">
+      <button type="button" onClick={() => setOculto(false)} className="fixed bottom-36 right-4 z-40 h-11 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper shadow-lg lg:bottom-24">
         Abrir guion
       </button>
     );

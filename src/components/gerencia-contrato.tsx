@@ -259,7 +259,7 @@ export function EditorContrato({
               .filter((campo) => campo.pagina === pagina && campo.enContrato !== false)
               .map((campo) => {
                 const id = idDe(campo);
-                const altoCaja = campo.size * 1.7;
+                const altoCaja = Math.max(campo.size * 1.15, 9);
                 return (
                   <button
                     key={id}
@@ -284,7 +284,7 @@ export function EditorContrato({
                       window.addEventListener("pointerup", soltar);
                     }}
                     className={
-                      "pointer-events-auto absolute cursor-move rounded-md border border-navy bg-lime/70 px-1 text-left text-[10px] font-semibold leading-none text-navy " +
+                      "pointer-events-auto absolute flex cursor-move items-end rounded-sm border border-navy bg-lime/70 px-0.5 text-left text-[10px] leading-none font-semibold text-navy " +
                       (activo === id ? "ring-2 ring-navy" : "")
                     }
                     style={{

@@ -72,18 +72,45 @@ function origenDe() {
   return `${proto}://${host}`;
 }
 
+function leerMapa(valor: unknown) {
+  if (!valor) return {} as Record<string, string>;
+  if (typeof valor === "object") return valor as Record<string, string>;
+  try {
+    return JSON.parse(String(valor)) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+async function textosDe(casoId: number, userId: string) {
+  const sql = await getSql();
+  const rows = await sql.query<{ textos: string }>(
+    `select cc.textos
+     from casos c
+     left join profiles dueno on dueno.user_id = c.owner_id
+     left join profiles yo on yo.user_id = $2
+     join ciudad_config cc on cc.ciudad_id = coalesce(nullif(c.ciudad_id, 0), nullif(dueno.ciudad_id, 0), nullif(yo.ciudad_id, 0), nullif(yo.ciudad_vista, 0))
+     where c.id = $1
+     limit 1`,
+    [casoId, userId],
+  );
+  return leerMapa(rows[0]?.textos);
+}
+
 async function mandar(correo: string, nombre: string, placa: string, enlace: string, asunto = "", cuerpo = "") {
   const { enviarCorreo, htmlCorreo } = await import("./correo.server");
-  const subject = (asunto || `Contrato para firmar · {placa}`).replaceAll("{nombre}", nombre).replaceAll("{placa}", placa);
+  const subject = (asunto.trim() || `Contrato para firmar · {placa}`).replaceAll("{nombre}", nombre).replaceAll("{placa}", placa);
   const base =
-    cuerpo ||
+    cuerpo.trim() ||
     "Hola {nombre},\n\nTe enviamos el contrato de vinculación de la placa {placa} para que lo leas y lo firmes. Vas a tomarte una foto de frente con tu cédula y después firmas en la pantalla.";
   const texto = base.replaceAll("{nombre}", nombre).replaceAll("{placa}", placa);
   const plano = texto.includes(enlace) ? texto : `${texto}\n\nEntra aquí y firma:\n${enlace}\n`;
-  const extra = texto
+  const lineas = texto
     .split(/\n+/)
     .map((linea) => linea.trim())
-    .filter((linea) => linea && !/^hola\b/i.test(linea) && !linea.includes(enlace) && !/te enviamos el contrato/i.test(linea));
+    .filter(Boolean);
+  const saludo = lineas.find((linea) => /^hola\b/i.test(linea)) || (nombre.trim() ? `Hola ${nombre.trim()}.` : "Hola.");
+  const parrafos = lineas.filter((linea) => linea !== saludo);
   const origen = origenDe();
   try {
     await enviarCorreo({
@@ -94,8 +121,8 @@ async function mandar(correo: string, nombre: string, placa: string, enlace: str
         titulo: "Firma del contrato",
         placa: placa || "",
         logo: `${origen}/taxis-libres-blanco.png`,
-        saludo: nombre.trim() ? `Hola ${nombre.trim()}.` : "Hola.",
-        parrafos: ["Te enviamos el contrato y la carta para que los leas con calma. Después firmas en la misma página.", ...extra],
+        saludo,
+        parrafos: parrafos.length ? parrafos : [texto],
         pasos: ["Lee el contrato y la carta.", "Tómate una foto de frente, con la cédula al lado de la cara.", "Firma en la pantalla y confirma."],
         boton: "Leer y firmar",
         enlace,
@@ -192,7 +219,7 @@ export const enviarPortal = createServerFn({ method: "POST" })
       cc2: otros[0]?.cc ?? "",
       propietarios: otros.map((parte) => ({ nombre: parte.nombre, cc: parte.cc })),
       empresa: recorte(String(caso.empresa ?? ""), 80),
-      nitAnterior: recorte(data.nitAnterior ?? "", 20),
+      nitAnterior: recorte(data.nitAnterior || extras.nitAnterior || "", 20),
       extras,
     };
     if (!datos.placa || !datos.nombre) throw new Error("Primero guarda placa y propietario");
@@ -213,16 +240,7 @@ export const enviarPortal = createServerFn({ method: "POST" })
     const { montarCarta } = await import("./carta-pdf.server");
     const carta = await montarCarta(datos, []);
     await dejarDocumento(data.casoId, "carta", `carta-${datos.placa}.pdf`, carta, profile.name);
-    const textos = await sql.query<{ textos: string }>(
-      `select ciudad_config.textos from casos join ciudad_config on ciudad_config.ciudad_id = casos.ciudad_id where casos.id = $1`,
-      [data.casoId],
-    );
-    let mapa: Record<string, string> = {};
-    try {
-      mapa = JSON.parse(textos[0]?.textos || "{}") as Record<string, string>;
-    } catch {
-      mapa = {};
-    }
+    const mapa = await textosDe(data.casoId, context.userId);
     const enviados: { correo: string; enlace: string; ok: boolean; error: string }[] = [];
     for (const parte of partes) {
       const token = tokenDe();
@@ -343,7 +361,8 @@ export const reenviarFirma = createServerFn({ method: "POST" })
     await sql.query(`update firmantes set correo = $1 where id = $2`, [correo, yo.id]);
     if (yo.orden === 1) await sql.query(`update casos set correo = $1, docuseal_estado = 'enviado', updated_at = now() where id = $2`, [correo, yo.caso_id]);
     else await sql.query(`update casos set docuseal_estado = 'enviado', updated_at = now() where id = $1`, [yo.caso_id]);
-    const error = await mandar(correo, yo.nombre, yo.placa, `${origenDe()}/firmar/${yo.token}`);
+    const mapa = await textosDe(yo.caso_id, context.userId);
+    const error = await mandar(correo, yo.nombre, yo.placa, `${origenDe()}/firmar/${yo.token}`, mapa.correo_firma_asunto, mapa.correo_firma_cuerpo);
     if (error) throw new Error(error);
     const { anotar } = await import("./auditoria.server");
     await anotar(profile, {

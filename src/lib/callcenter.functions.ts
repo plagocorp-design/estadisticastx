@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { hoyBogota } from "@/lib/casos";
+import { hoyBogota, ORIGENES } from "@/lib/casos";
 import { horaBogota } from "@/lib/bitacora";
 import { llevaProcesos, veElEquipo } from "@/lib/team.public";
 import {
@@ -56,31 +56,6 @@ function tipoPersona(value: string): TipoPersona {
   return value === "propietario" || value === "desconocido" ? value : "conductor";
 }
 
-const PENDIENTE = `
-  (
-    exists (
-      select 1 from call_gestiones g
-      where g.contacto_id = c.id
-        and g.id = (select max(g2.id) from call_gestiones g2 where g2.contacto_id = c.id)
-        and lower(g.proxima) in ('llamar', 'whatsapp', 'agendar')
-        and (g.fecha_proxima = '' or g.fecha_proxima <= $HOY)
-        and lower(coalesce(g.resultado, '')) <> 'afiliado'
-    )
-    or (
-      not exists (select 1 from call_gestiones g where g.contacto_id = c.id)
-      and not exists (
-        select 1 from call_contactos o
-        where o.ciudad_id = c.ciudad_id
-          and o.empresa = c.empresa
-          and o.placa = c.placa
-          and o.placa <> ''
-          and o.id <> c.id
-          and exists (select 1 from call_gestiones g where g.contacto_id = o.id)
-      )
-    )
-  )
-`;
-
 function visible() {
   return `
     c.ciudad_id = $1
@@ -115,6 +90,110 @@ function visible() {
       )
     )
   `;
+}
+
+const ACTIVA = `exists (select 1 from call_empresas e where e.ciudad_id = c.ciudad_id and e.empresa = c.empresa and e.activa = 1)`;
+const FILA_SQL = `c.id, c.empresa, c.nombre, c.estado, c.telefono, c.propietario, c.tel_propietario, c.vehiculo, c.placa, c.anio, c.cc, c.duplicado, c.caso_id, c.orden`;
+
+function compararFila(a: { empresa: string; orden: number; id: number }, b: { empresa: string; orden: number; id: number }, dir: "ant" | "sig") {
+  if (a.empresa !== b.empresa) {
+    const n = a.empresa < b.empresa ? -1 : 1;
+    return dir === "sig" ? n : -n;
+  }
+  if (Number(a.orden) !== Number(b.orden)) {
+    const n = Number(a.orden) - Number(b.orden);
+    return dir === "sig" ? n : -n;
+  }
+  const n = Number(a.id) - Number(b.id);
+  return dir === "sig" ? n : -n;
+}
+
+async function idPorLado(sql: Sql, ciudad: number, slug: string, fila: { empresa: string; orden: number; id: number }, dir: "ant" | "sig") {
+  const cmp = dir === "sig" ? ">" : "<";
+  const order = dir === "sig" ? "c.empresa, c.orden, c.id" : "c.empresa desc, c.orden desc, c.id desc";
+  const params = [ciudad, slug, fila.empresa, Number(fila.orden), Number(fila.id)];
+  const [porTurno, porGestion] = await Promise.all([
+    sql.query<{ id: number; empresa: string; orden: number }>(
+      `select c.id, c.empresa, c.orden
+       from call_contactos c
+       where c.ciudad_id = $1 and c.turno_slug = $2
+         and ${ACTIVA}
+         and not exists (
+           select 1 from call_gestiones g
+           where g.contacto_id = c.id and btrim(coalesce(g.asesor_slug, '')) <> ''
+         )
+         and (c.empresa, c.orden, c.id) ${cmp} ($3, $4, $5)
+       order by ${order}
+       limit 1`,
+      params,
+    ),
+    sql.query<{ id: number; empresa: string; orden: number }>(
+      `select c.id, c.empresa, c.orden
+       from call_gestiones g
+       join call_contactos c on c.id = g.contacto_id
+       where g.ciudad_id = $1 and g.asesor_slug = $2 and c.ciudad_id = $1
+         and ${ACTIVA}
+         and not exists (
+           select 1 from call_gestiones n
+           where n.contacto_id = g.contacto_id and n.id > g.id
+         )
+         and (c.empresa, c.orden, c.id) ${cmp} ($3, $4, $5)
+       order by ${order}
+       limit 1`,
+      params,
+    ),
+  ]);
+  const todos = [...porTurno, ...porGestion];
+  todos.sort((a, b) => compararFila(a, b, dir));
+  return todos[0] ? Number(todos[0].id) : null;
+}
+
+async function pendienteCerca(sql: Sql, ciudad: number, slug: string, hoy: string, despues: { empresa: string; orden: number; id: number } | null) {
+  const turnoCmp = despues ? "and (c.empresa, c.orden, c.id) > ($3, $4, $5)" : "";
+  const gestionCmp = despues ? "and (c.empresa, c.orden, c.id) > ($4, $5, $6)" : "";
+  const turnoParams = despues
+    ? [ciudad, slug, despues.empresa, Number(despues.orden), Number(despues.id)]
+    : [ciudad, slug];
+  const gestionParams = despues
+    ? [ciudad, slug, hoy, despues.empresa, Number(despues.orden), Number(despues.id)]
+    : [ciudad, slug, hoy];
+  const [porTurno, porGestion] = await Promise.all([
+    sql.query<FilaContacto>(
+      `select ${FILA_SQL}
+       from call_contactos c
+       where c.ciudad_id = $1 and c.turno_slug = $2
+         and ${ACTIVA}
+         and not exists (
+           select 1 from call_gestiones g
+           where g.contacto_id = c.id and btrim(coalesce(g.asesor_slug, '')) <> ''
+         )
+         ${turnoCmp}
+       order by c.empresa, c.orden, c.id
+       limit 1`,
+      turnoParams,
+    ),
+    sql.query<FilaContacto>(
+      `select ${FILA_SQL}
+       from call_gestiones g
+       join call_contactos c on c.id = g.contacto_id
+       where g.ciudad_id = $1 and g.asesor_slug = $2 and c.ciudad_id = $1
+         and ${ACTIVA}
+         and not exists (
+           select 1 from call_gestiones n
+           where n.contacto_id = g.contacto_id and n.id > g.id
+         )
+         and lower(g.proxima) in ('llamar', 'whatsapp', 'agendar')
+         and (g.fecha_proxima = '' or g.fecha_proxima <= $3)
+         and lower(coalesce(g.resultado, '')) <> 'afiliado'
+         ${gestionCmp}
+       order by c.empresa, c.orden, c.id
+       limit 1`,
+      gestionParams,
+    ),
+  ]);
+  const todos = [...porTurno, ...porGestion];
+  todos.sort((a, b) => compararFila(a, b, "sig"));
+  return todos[0] ?? null;
 }
 
 type FilaContacto = {
@@ -198,30 +277,10 @@ function aGestion(row: FilaGestion | undefined): GestionVista | null {
 }
 
 async function armarContacto(sql: Sql, ciudad: number, slug: string, fila: FilaContacto, hoy: string): Promise<ContactoCall> {
-  const where = visible();
-  const paramsBase = [ciudad, slug, hoy];
-  const [totalRow, pendRow, posRow, ant, sig, libre, hoyRow, gestiones] = await Promise.all([
-    sql.query<{ n: number }>(`select count(*)::int as n from call_contactos c where ${where}`, paramsBase),
-    sql.query<{ n: number }>(
-      `select count(*)::int as n from call_contactos c where ${where} and ${PENDIENTE.replaceAll("$HOY", "$3")}`,
-      paramsBase,
-    ),
-    sql.query<{ n: number }>(
-      `select count(*)::int as n from call_contactos c where ${where} and (c.empresa, c.orden, c.id) <= ($4, $5, $6)`,
-      [...paramsBase, fila.empresa, Number(fila.orden), Number(fila.id)],
-    ),
-    sql.query<{ id: number }>(
-      `select c.id from call_contactos c where ${where} and (c.empresa, c.orden, c.id) < ($4, $5, $6) order by c.empresa desc, c.orden desc, c.id desc limit 1`,
-      [...paramsBase, fila.empresa, Number(fila.orden), Number(fila.id)],
-    ),
-    sql.query<{ id: number }>(
-      `select c.id from call_contactos c where ${where} and (c.empresa, c.orden, c.id) > ($4, $5, $6) order by c.empresa, c.orden, c.id limit 1`,
-      [...paramsBase, fila.empresa, Number(fila.orden), Number(fila.id)],
-    ),
-    sql.query<{ id: number }>(
-      `select c.id from call_contactos c where ${where} and ${PENDIENTE.replaceAll("$HOY", "$3")} and (c.empresa, c.orden, c.id) > ($4, $5, $6) order by c.empresa, c.orden, c.id limit 1`,
-      [...paramsBase, fila.empresa, Number(fila.orden), Number(fila.id)],
-    ),
+  const [anteriorId, siguienteId, libre, hoyRow, gestiones] = await Promise.all([
+    idPorLado(sql, ciudad, slug, fila, "ant"),
+    idPorLado(sql, ciudad, slug, fila, "sig"),
+    pendienteCerca(sql, ciudad, slug, hoy, { empresa: fila.empresa, orden: Number(fila.orden), id: Number(fila.id) }),
     sql.query<{ n: number; segundos: number }>(
       `select count(*)::int as n, coalesce(sum(segundos), 0)::int as segundos
        from call_gestiones where ciudad_id = $1 and asesor_slug = $2 and fecha = $3`,
@@ -235,14 +294,14 @@ async function armarContacto(sql: Sql, ciudad: number, slug: string, fila: FilaC
       [fila.id],
     ),
   ]);
-  let siguienteLibreId = libre[0] ? Number(libre[0].id) : null;
+  let siguienteLibreId = libre ? Number(libre.id) : null;
   if (!siguienteLibreId) {
-    const primero = await sql.query<{ id: number }>(
-      `select c.id from call_contactos c where ${where} and ${PENDIENTE.replaceAll("$HOY", "$3")} order by c.empresa, c.orden, c.id limit 1`,
-      paramsBase,
-    );
-    siguienteLibreId = primero[0] && Number(primero[0].id) !== Number(fila.id) ? Number(primero[0].id) : null;
+    const primero = await pendienteCerca(sql, ciudad, slug, hoy, null);
+    siguienteLibreId = primero && Number(primero.id) !== Number(fila.id) ? Number(primero.id) : null;
   }
+  const origenGuardado = fila.caso_id
+    ? (await sql.query<{ origen: string }>(`select coalesce(origen, '') as origen from casos where id = $1`, [fila.caso_id]))[0]?.origen || ""
+    : "";
   return {
     id: Number(fila.id),
     empresa: fila.empresa,
@@ -257,11 +316,12 @@ async function armarContacto(sql: Sql, ciudad: number, slug: string, fila: FilaC
     cc: fila.cc,
     duplicado: Number(fila.duplicado) === 1,
     casoId: fila.caso_id,
-    posicion: Number(posRow[0]?.n) || 1,
-    total: Number(totalRow[0]?.n) || 0,
-    pendientes: Number(pendRow[0]?.n) || 0,
-    anteriorId: ant[0] ? Number(ant[0].id) : null,
-    siguienteId: sig[0] ? Number(sig[0].id) : null,
+    origen: origenGuardado,
+    posicion: 1,
+    total: 0,
+    pendientes: 0,
+    anteriorId,
+    siguienteId,
     siguienteLibreId,
     hoyLlamadas: Number(hoyRow[0]?.n) || 0,
     hoySegundos: Number(hoyRow[0]?.segundos) || 0,
@@ -308,21 +368,24 @@ async function puedeVer(sql: Sql, ciudad: number, slug: string, id: number, hoy:
   return Boolean(rows[0]);
 }
 
+async function gestionEsSuya(sql: Sql, contactoId: number, slug: string) {
+  const rows = await sql.query<{ ok: number }>(
+    `select 1 as ok from call_gestiones
+     where contacto_id = $1 and asesor_slug = $2
+       and id = (select max(id) from call_gestiones where contacto_id = $1)
+     limit 1`,
+    [contactoId, slug],
+  );
+  return Boolean(rows[0]);
+}
+
 async function primerPendiente(sql: Sql, ciudad: number, slug: string, hoy: string) {
   const activas = await sql.query<{ empresa: string }>(
     `select empresa from call_empresas where ciudad_id = $1 and activa = 1 limit 1`,
     [ciudad],
   );
   if (!activas[0]) return null;
-  const rows = await sql.query<FilaContacto>(
-    `select c.id, c.empresa, c.nombre, c.estado, c.telefono, c.propietario, c.tel_propietario, c.vehiculo, c.placa, c.anio, c.cc, c.duplicado, c.caso_id, c.orden
-     from call_contactos c
-     where ${visible()} and ${PENDIENTE.replaceAll("$HOY", "$3")}
-     order by c.empresa, c.orden, c.id
-     limit 1`,
-    [ciudad, slug, hoy],
-  );
-  return rows[0] ?? null;
+  return pendienteCerca(sql, ciudad, slug, hoy, null);
 }
 
 function claveContacto(empresa: string, placa: string, telefono: string, nombre: string) {
@@ -334,6 +397,7 @@ const placasRepartidas = new Set<number>();
 
 async function repartirPlacas(sql: Sql, ciudad: number) {
   await sql.query(`alter table call_contactos add column if not exists turno_slug text not null default ''`);
+  await sql.query(`alter table call_contactos add column if not exists cola integer not null default 0`);
   await sql.query(`create index if not exists call_contactos_turno_idx on call_contactos (ciudad_id, turno_slug)`);
   await sql.query(
     `update call_contactos c
@@ -365,6 +429,8 @@ async function repartirPlacas(sql: Sql, ciudad: number) {
          limit 1
        ) elegido on true
        where c2.ciudad_id = $1
+         and coalesce(c2.turno_slug, '') = ''
+         and coalesce(c2.cola, 0) = 1
          and not exists (
            select 1 from call_gestiones g
            where g.contacto_id = c2.id and coalesce(g.asesor_slug, '') <> ''
@@ -376,8 +442,38 @@ async function repartirPlacas(sql: Sql, ciudad: number) {
   placasRepartidas.add(ciudad);
 }
 
+const indicesCola = new Set<number>();
+
+async function indicesDeCola(sql: Sql, ciudad: number) {
+  if (indicesCola.has(ciudad)) return;
+  try {
+    await sql.query(`create index if not exists call_contactos_turno_idx on call_contactos (ciudad_id, turno_slug)`);
+    await sql.query(`create index if not exists call_gestiones_asesor_cola_idx on call_gestiones (ciudad_id, asesor_slug, contacto_id, id desc)`);
+  } catch {
+    /* otro request ya está creando el índice */
+  }
+  indicesCola.add(ciudad);
+}
+
 async function repartirPlacasUnaVez(sql: Sql, ciudad: number) {
   if (placasRepartidas.has(ciudad)) return;
+  await sql.query(`alter table call_contactos add column if not exists turno_slug text not null default ''`);
+  await sql.query(`alter table call_contactos add column if not exists cola integer not null default 0`);
+  await indicesDeCola(sql, ciudad);
+  const falta = await sql.query<{ id: number }>(
+    `select c.id from call_contactos c
+     where c.ciudad_id = $1 and c.turno_slug = '' and c.cola = 1
+       and not exists (
+         select 1 from call_gestiones g
+         where g.contacto_id = c.id and btrim(coalesce(g.asesor_slug, '')) <> ''
+       )
+     limit 1`,
+    [ciudad],
+  );
+  if (!falta[0]) {
+    placasRepartidas.add(ciudad);
+    return;
+  }
   await repartirPlacas(sql, ciudad);
 }
 
@@ -459,6 +555,106 @@ async function cruzarPlacasUnaVez(sql: Sql, ciudad: number) {
   const n = await cruzarPlacas(sql, ciudad);
   placasCruzadas.add(ciudad);
   return n;
+}
+
+export type PlacaDeBase = {
+  casoId: number;
+  placa: string;
+  nombre: string;
+  asesor: string;
+  empresa: string;
+  origen: string;
+  fecha: string;
+  estado: string;
+  desde: string;
+};
+
+export async function amarrarProcesos(sql: Sql, ciudad: number, placa = "") {
+  await sql.query(`alter table call_contactos add column if not exists cruce text not null default ''`);
+  await sql.query(
+    `update call_contactos set cruce = 'llamar'
+     where ciudad_id = $1 and coalesce(caso_id, 0) <> 0 and btrim(cruce) = ''`,
+    [ciudad],
+  );
+  const filtro = placa ? `and upper(regexp_replace(c.placa, '\\s', '', 'g')) = upper(regexp_replace($2, '\\s', '', 'g'))` : "";
+  await sql.query(
+    `with match as (
+       select distinct on (c.id) c.id as contacto_id, ca.id as caso_id
+       from call_contactos c
+       join casos ca
+         on upper(regexp_replace(ca.placa, '\\s', '', 'g')) = upper(regexp_replace(c.placa, '\\s', '', 'g'))
+        and coalesce(ca.ciudad_id, 1) = c.ciudad_id
+       where c.ciudad_id = $1
+         and coalesce(c.caso_id, 0) = 0
+         and btrim(c.placa) <> ''
+         and btrim(ca.placa) <> ''
+         ${filtro}
+       order by c.id,
+         (not ca.completado and btrim(coalesce(ca.motivo_cierre, '')) = '') desc,
+         ca.id desc
+     )
+     update call_contactos c
+     set caso_id = match.caso_id,
+         cruce = case when btrim(c.cruce) = '' then 'placa' else c.cruce end
+     from match
+     where c.id = match.contacto_id`,
+    placa ? [ciudad, placa] : [ciudad],
+  );
+  await sql.query(
+    `update call_gestiones g
+     set caso_id = c.caso_id
+     from call_contactos c
+     where g.contacto_id = c.id
+       and c.ciudad_id = $1
+       and coalesce(c.caso_id, 0) <> 0
+       and coalesce(g.caso_id, 0) = 0`,
+    [ciudad],
+  );
+}
+
+async function placasDeLaBase(sql: Sql, ciudad: number, ligar = true): Promise<PlacaDeBase[]> {
+  if (ligar) await amarrarProcesos(sql, ciudad);
+  const rows = await sql.query<{
+    caso_id: number; placa: string; nombre: string; asesor: string; empresa: string; origen: string; fecha: string; estado: string; desde: string;
+  }>(
+    `select distinct on (ca.id)
+            ca.id as caso_id,
+            upper(regexp_replace(ca.placa, '\\s', '', 'g')) as placa,
+            coalesce(ca.nombre, '') as nombre,
+            coalesce(nullif(p.name, ''), 'Sin asesor') as asesor,
+            coalesce(nullif(c.empresa, ''), nullif(ca.empresa, ''), '') as empresa,
+            coalesce(ca.origen, '') as origen,
+            coalesce(nullif(ca.fecha_inicio, ''), to_char(ca.created_at at time zone 'America/Bogota', 'YYYY-MM-DD')) as fecha,
+            case
+              when ca.completado or ca.tarjeta_entregada then 'Vinculado'
+              when btrim(coalesce(ca.motivo_cierre, '')) <> '' then 'Cerrado'
+              else 'Abierto'
+            end as estado,
+            case when c.cruce = 'llamar' then 'Llamar' else 'Base de datos (Call)' end as desde
+     from call_contactos c
+     join casos ca on ca.id = c.caso_id
+     left join profiles p on p.user_id = ca.owner_id
+     where c.ciudad_id = $1 and coalesce(c.caso_id, 0) <> 0
+       and (
+         translate(lower(btrim(coalesce(ca.origen, ''))), 'áéíóú', 'aeiou') like 'base de datos%'
+         or (c.cruce = 'llamar' and btrim(coalesce(ca.origen, '')) = '')
+       )
+     order by ca.id, case when c.cruce = 'llamar' then 0 else 1 end, c.id`,
+    [ciudad],
+  );
+  return rows
+    .map((row) => ({
+      casoId: Number(row.caso_id),
+      placa: row.placa,
+      nombre: row.nombre,
+      asesor: row.asesor,
+      empresa: row.empresa,
+      origen: row.origen,
+      fecha: String(row.fecha || "").slice(0, 10),
+      estado: row.estado,
+      desde: row.desde,
+    }))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha) || a.placa.localeCompare(b.placa));
 }
 
 async function sembrarBriefing(sql: Sql, ciudad: number) {
@@ -554,24 +750,77 @@ async function anotarBitacora(sql: Sql, ownerId: string, fecha: string, linea: s
   );
 }
 
+let canalListo = false;
+
+async function asegurarCanal(sql: Sql) {
+  if (!canalListo) {
+    await sql.query(`alter table call_gestiones add column if not exists canal text not null default 'llamada'`);
+    await sql.query(`alter table call_contactos add column if not exists cola integer not null default 0`);
+    await sql.query(`create index if not exists call_contactos_placa_sola_idx on call_contactos (ciudad_id, placa)`);
+    canalListo = true;
+  }
+  const pendiente = await sql.query<{ ok: number }>(
+    `select 1 as ok from call_gestiones
+     where canal = 'llamada'
+       and (
+         observacion_final ilike 'No Efectivo / Sin Respuesta%'
+         or observacion_final ilike 'Atencion Presencial%'
+         or observacion_final ilike 'Atención Presencial%'
+         or observacion_final ilike 'Acompañamiento %'
+         or observacion_final ilike 'Radicación Documentación%'
+         or observacion_final ilike 'Radicacion Documentación%'
+         or observacion_final ilike 'Pendiente Documentación%'
+         or observacion_final ilike 'Compro polizas%'
+         or observacion_final ilike 'Le interesa la informacion%'
+         or observacion_final ilike 'Contacto Efectivo.%'
+         or btrim(observacion_final) = 'Contacto Efectivo'
+       )
+     limit 1`,
+  );
+  if (!pendiente[0]) return;
+  await sql.query(
+    `update call_gestiones set canal = 'whatsapp'
+     where canal = 'llamada'
+       and (
+         observacion_final ilike 'No Efectivo / Sin Respuesta%'
+         or observacion_final ilike 'Atencion Presencial%'
+         or observacion_final ilike 'Atención Presencial%'
+         or observacion_final ilike 'Acompañamiento %'
+         or observacion_final ilike 'Radicación Documentación%'
+         or observacion_final ilike 'Radicacion Documentación%'
+         or observacion_final ilike 'Pendiente Documentación%'
+         or observacion_final ilike 'Compro polizas%'
+         or observacion_final ilike 'Le interesa la informacion%'
+         or observacion_final ilike 'Contacto Efectivo.%'
+         or btrim(observacion_final) = 'Contacto Efectivo'
+       )`,
+  );
+}
+
+function canalDe(g: { canal?: string }) {
+  return g.canal === "whatsapp" ? "whatsapp" : "llamada";
+}
+
 async function insertarGestion(sql: Sql, contactoId: number, ciudad: number, g: GestionImportada, asesor: { id: string; slug: string; nombre: string; fecha: string; hora: string; segundos: number }) {
+  await sql.query(`alter table call_gestiones add column if not exists canal text not null default 'llamada'`);
   const rows = await sql.query<{ id: number }>(
     `insert into call_gestiones (
        contacto_id, ciudad_id, asesor_id, asesor_slug, asesor_nombre, fecha, hora, segundos,
        tipo_persona, nombre_prop, cc, tel_prop, tiene_nuevo, nuevo_nombre, nuevo_tel, solo_propietario,
        clasificacion, calificacion, obs_sao, obs_conductor, obs_propietario, intencion, proxima,
-       fecha_proxima, no_aplica_proxima, resultado, fecha_afiliacion, no_aplica_afiliacion, motivo, observacion_final
+       fecha_proxima, no_aplica_proxima, resultado, fecha_afiliacion, no_aplica_afiliacion, motivo, observacion_final, canal
      ) values (
        $1,$2,$3,$4,$5,$6,$7,$8,
        $9,$10,$11,$12,$13,$14,$15,$16,
        $17,$18,$19,$20,$21,$22,$23,
-       $24,$25,$26,$27,$28,$29,$30
+       $24,$25,$26,$27,$28,$29,$30,$31
      ) returning id`,
     [
       contactoId, ciudad, asesor.id, asesor.slug, asesor.nombre || g.agente, asesor.fecha || g.fecha, asesor.hora, asesor.segundos,
       g.tipoPersona, g.nombreProp, g.cc, g.telProp, g.tieneNuevo ? 1 : 0, g.nuevoNombre, g.nuevoTel, g.soloPropietario ? 1 : 0,
       g.clasificacion, g.calificacion, g.sao, g.conductor, g.propietario, g.intencion, g.proxima,
       g.fechaProxima, g.noAplicaProxima ? 1 : 0, g.resultado, g.fechaAfiliacion, g.noAplicaAfiliacion ? 1 : 0, g.motivo, g.observacionFinal,
+      canalDe(g),
     ],
   );
   return Number(rows[0]?.id) || 0;
@@ -583,6 +832,7 @@ function valoresGestion(ciudad: number, g: GestionImportada, asesor: { id: strin
     g.tipoPersona, g.nombreProp, g.cc, g.telProp, g.tieneNuevo ? 1 : 0, g.nuevoNombre, g.nuevoTel, g.soloPropietario ? 1 : 0,
     g.clasificacion, g.calificacion, g.sao, g.conductor, g.propietario, g.intencion, g.proxima,
     g.fechaProxima, g.noAplicaProxima ? 1 : 0, g.resultado, g.fechaAfiliacion, g.noAplicaAfiliacion ? 1 : 0, g.motivo, g.observacionFinal,
+    canalDe(g),
   ];
 }
 
@@ -592,7 +842,7 @@ async function actualizarGestion(sql: Sql, gestionId: number, ciudad: number, g:
        ciudad_id=$2, asesor_id=$3, asesor_slug=$4, asesor_nombre=$5, fecha=$6, hora=$7,
        tipo_persona=$8, nombre_prop=$9, cc=$10, tel_prop=$11, tiene_nuevo=$12, nuevo_nombre=$13, nuevo_tel=$14, solo_propietario=$15,
        clasificacion=$16, calificacion=$17, obs_sao=$18, obs_conductor=$19, obs_propietario=$20, intencion=$21, proxima=$22,
-       fecha_proxima=$23, no_aplica_proxima=$24, resultado=$25, fecha_afiliacion=$26, no_aplica_afiliacion=$27, motivo=$28, observacion_final=$29
+       fecha_proxima=$23, no_aplica_proxima=$24, resultado=$25, fecha_afiliacion=$26, no_aplica_afiliacion=$27, motivo=$28, observacion_final=$29, canal=$30
      where id=$1`,
     [gestionId, ...valoresGestion(ciudad, g, asesor)],
   );
@@ -627,6 +877,8 @@ function gestionIgual(
 }
 
 async function meterContactos(sql: Sql, baseId: number, ciudad: number, lista: ContactoLimpio[]) {
+  await sql.query(`alter table call_contactos add column if not exists turno_slug text not null default ''`);
+  await sql.query(`alter table call_contactos add column if not exists cola integer not null default 0`);
   const ids: number[] = [];
   const TAM = 120;
   for (let i = 0; i < lista.length; i += TAM) {
@@ -634,24 +886,47 @@ async function meterContactos(sql: Sql, baseId: number, ciudad: number, lista: C
     const params: unknown[] = [];
     const grupos: string[] = [];
     trozo.forEach((item, n) => {
-      const b = n * 14;
+      const b = n * 16;
       grupos.push(
-        `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14})`,
+        `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14},$${b + 15},$${b + 16})`,
       );
       params.push(
         baseId, ciudad, item.empresa, item.nombre, item.estado, item.telefono, item.propietario, item.telPropietario,
-        item.vehiculo, item.placa, item.anio, item.cc, item.orden, item.duplicado ? 1 : 0,
+        item.vehiculo, item.placa, item.anio, item.cc, item.orden, item.duplicado ? 1 : 0, item.turnoSlug || "", item.enCola ? 1 : 0,
       );
     });
     const rows = await sql.query<{ id: number }>(
       `insert into call_contactos (
-         base_id, ciudad_id, empresa, nombre, estado, telefono, propietario, tel_propietario, vehiculo, placa, anio, cc, orden, duplicado
+         base_id, ciudad_id, empresa, nombre, estado, telefono, propietario, tel_propietario, vehiculo, placa, anio, cc, orden, duplicado, turno_slug, cola
        ) values ${grupos.join(",")} returning id`,
       params,
     );
     for (const row of rows) ids.push(Number(row.id));
   }
   return ids;
+}
+
+async function asignarTurnos(sql: Sql, pares: { id: number; slug: string }[]) {
+  await sql.query(`alter table call_contactos add column if not exists cola integer not null default 0`);
+  const unicos = new Map<number, string>();
+  for (const par of pares) if (par.id && par.slug) unicos.set(par.id, par.slug);
+  const lista = [...unicos.entries()].map(([id, slug]) => ({ id, slug }));
+  const TAM = 200;
+  for (let i = 0; i < lista.length; i += TAM) {
+    const trozo = lista.slice(i, i + TAM);
+    const params: unknown[] = [];
+    const values = trozo.map((par, n) => {
+      params.push(par.id, par.slug);
+      return `($${n * 2 + 1}::int, $${n * 2 + 2})`;
+    });
+    await sql.query(
+      `update call_contactos c set turno_slug = v.slug, cola = 1
+       from (values ${values.join(",")}) as v(id, slug)
+       where c.id = v.id and (c.turno_slug is distinct from v.slug or coalesce(c.cola, 0) = 0)`,
+      params,
+    );
+  }
+  return lista.length;
 }
 
 export type BaseCall = {
@@ -691,6 +966,20 @@ export type DistintivoItem = {
   festivo: string;
 };
 
+export type EfectividadFila = {
+  nombre: string;
+  contesto: number;
+  noInteresado: number;
+  considera: number;
+  quiere: number;
+  enProceso: number;
+  noAfiliado: number;
+  noLocalizado: number;
+  afiliado: number;
+  procesosAbiertos: number;
+  vinculados: number;
+};
+
 export type MesCall = {
   mes: string;
   total: number;
@@ -701,12 +990,38 @@ export type MesCall = {
   porEmpresa: { empresa: string; total: number; efectivos: number }[];
   porCalificacion: { calificacion: string; clasificacion: string; total: number }[];
   porDia: { fecha: string; total: number; efectivos: number }[];
+  efectividad: EfectividadFila[];
+};
+
+export type CorteCall = {
+  fecha: string;
+  asesor: string;
+  empresa: string;
+  clasificacion: string;
+  calificacion: string;
+  intencion: string;
+  resultado: string;
+  total: number;
+  efectivos: number;
+  noEfectivos: number;
+  segundos: number;
+};
+
+export type ProcesoStat = {
+  mes: string;
+  nombre: string;
+  empresa: string;
+  abiertos: number;
+  vinculados: number;
 };
 
 export type StatsCall = {
   meses: MesCall[];
   dia: string;
-  minutos: { hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; segundos: number }[];
+  minutos: { hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; empresa: string; segundos: number }[];
+  placas: PlacaDeBase[];
+  cortes: CorteCall[];
+  procesos: ProcesoStat[];
 };
 
 export const resumenCall = createServerFn({ method: "GET" })
@@ -727,16 +1042,11 @@ export const resumenCall = createServerFn({ method: "GET" })
     let pendientes = 0;
     let hoyN = 0;
     let hoySeg = 0;
-    if (llevaProcesos(profile.role) && Number(activas[0]?.n) > 0) {
-      const pend = await sql.query<{ n: number }>(
-        `select count(*)::int as n from call_contactos c where ${visible()} and ${PENDIENTE.replaceAll("$HOY", "$3")}`,
-        [ciudad, profile.slug, hoy],
-      );
+    if (llevaProcesos(profile.role)) {
       const dia = await sql.query<{ n: number; segundos: number }>(
         `select count(*)::int as n, coalesce(sum(segundos), 0)::int as segundos from call_gestiones where ciudad_id = $1 and asesor_slug = $2 and fecha = $3`,
         [ciudad, profile.slug, hoy],
       );
-      pendientes = Number(pend[0]?.n) || 0;
       hoyN = Number(dia[0]?.n) || 0;
       hoySeg = Number(dia[0]?.segundos) || 0;
     }
@@ -884,6 +1194,19 @@ export const trozoBase = createServerFn({ method: "POST" })
     }
     const nuevos: ContactoLimpio[] = [];
     const aplicar: { id: number; gestion: GestionImportada; modo: "nueva" | "actualizar" }[] = [];
+    const asignar: { id: number; slug: string }[] = [];
+    const colas = new Map<string, number>();
+    const conAgente = crudas.filter((fila) => fila.agente.trim()).length;
+    const esCola = conAgente >= 30 && conAgente >= crudas.length * 0.4;
+    const slugDe = (agente: string) => {
+      const quien = asesorDeNombre(equipo, agente);
+      if (!quien.slug) {
+        if (agente.trim()) sinAsesor.add(agente.trim());
+        return "";
+      }
+      colas.set(quien.nombre, (colas.get(quien.nombre) ?? 0) + 1);
+      return quien.slug;
+    };
     let repetidos = limpio.repetidos;
     let relacionadas = 0;
     let conservadas = 0;
@@ -894,6 +1217,10 @@ export const trozoBase = createServerFn({ method: "POST" })
       return [...new Set(porPlaca.get(`${normalizar(empresa)}|${placa}`) ?? [])].filter((id) => id > 0);
     };
     for (const item of limpio.limpios) {
+      if (esCola && item.agente) {
+        item.turnoSlug = slugDe(item.agente);
+        if (item.turnoSlug) item.enCola = 1;
+      }
       const clave = claveContacto(item.empresa, item.placa, item.telefono, item.nombre);
       const hermanos = hermanosDe(item.empresa, item.placa);
       const conGestion = hermanos.find((id) => ultimas.has(id));
@@ -907,11 +1234,13 @@ export const trozoBase = createServerFn({ method: "POST" })
         const pendiente = enArchivo.get(llavePlaca)!;
         repetidos += 1;
         if (item.gestion && !pendiente.gestion) pendiente.gestion = item.gestion;
+        if (item.turnoSlug && !pendiente.turnoSlug) pendiente.turnoSlug = item.turnoSlug;
         continue;
       }
       if (previo) {
         repetidos += 1;
         porClave.set(clave, previo);
+        if (item.turnoSlug) asignar.push({ id: previo, slug: item.turnoSlug });
         if (item.gestion) {
           const destino = (item.gestion && conGestion) || previo;
           const actual = ultimas.get(destino);
@@ -969,13 +1298,15 @@ export const trozoBase = createServerFn({ method: "POST" })
         await actualizarGestion(sql, Number(actual.id), ciudad, item.gestion, asesor);
         actualizadas += 1;
       }
-      const empresas = [...new Set(nuevos.map((item) => item.empresa))];
+      const empresas = [...new Set(limpio.limpios.map((item) => item.empresa).filter((empresa) => empresa && empresa !== "SIN EMPRESA"))];
       for (const empresa of empresas) {
         await sql.query(
-          `insert into call_empresas (ciudad_id, empresa, activa) values ($1, $2, 0) on conflict (ciudad_id, empresa) do nothing`,
-          [ciudad, empresa],
+          `insert into call_empresas (ciudad_id, empresa, activa) values ($1, $2, $3)
+           on conflict (ciudad_id, empresa) do update set activa = case when excluded.activa = 1 then 1 else call_empresas.activa end`,
+          [ciudad, empresa, esCola ? 1 : 0],
         );
       }
+      await asignarTurnos(sql, asignar);
       const cuentaEmp = await sql.query<{ n: number }>(
         `select count(distinct empresa)::int as n from call_contactos where base_id = $1`,
         [baseId],
@@ -996,6 +1327,12 @@ export const trozoBase = createServerFn({ method: "POST" })
     }
     const detalleAsesor = [...porAsesor.entries()].map(([quien, n]) => `${quien} ${n}`).join(", ");
     const avisoAsesor = detalleAsesor ? ` Gestiones: ${detalleAsesor}.` : "";
+    const avisoCola = esCola
+      ? ` Esta es la base de gestión, no el listado completo. Cada placa quedó con su agente${colas.size ? `: ${[...colas.entries()].map(([quien, n]) => `${quien} ${n}`).join(", ")}` : ""}. Esas empresas quedaron activas. Las que no tienen agente no entran a la cola.`
+      : conAgente === 0 && crudas.length > 1000
+        ? " Esta es la base completa: quedan todas las placas y empresas para cruzar. No prende la cola ni reparte llamadas. La cola sale del archivo de gestión, el que trae la columna AGENTE."
+        : " Las empresas quedan apagadas: actívalas para que salgan en la cola.";
+    const avisoPuestos = !esCola && asignar.length ? ` ${asignar.length} placas se pasaron al agente del archivo.` : "";
     const avisoHueco = sinAsesor.size ? ` Sin usuario en la app: ${[...sinAsesor].join(", ")}.` : "";
     const avisoRelacion = relacionadas ? ` ${relacionadas} se ligaron por la misma placa y empresa.` : "";
     const avisoCruce = cruzados ? ` ${cruzados} duplicados de la misma placa se quitaron: la tipificación queda en la placa.` : "";
@@ -1012,7 +1349,7 @@ export const trozoBase = createServerFn({ method: "POST" })
       ok: true as const,
       listo: true as const,
       filas: nuevos.length,
-      aviso: `${nuevos.length} contactos nuevos. ${repetidos} ya estaban.${avisoRelacion}${avisoCruce}${avisoGestion} ${limpio.separados} salieron de celdas con //.${avisoAsesor}${avisoHueco} Las empresas quedan apagadas: actívalas para que salgan en la cola.`,
+      aviso: `${nuevos.length} contactos nuevos. ${repetidos} ya estaban.${avisoRelacion}${avisoCruce}${avisoGestion} ${limpio.separados} salieron de celdas con //.${avisoAsesor}${avisoPuestos}${avisoHueco}${avisoCola}`,
     };
   });
 
@@ -1046,6 +1383,7 @@ export const trozoGestiones = createServerFn({ method: "POST" })
     }
     const archivo = partes.map((parte) => parte.datos).join("");
     const nombre = partes[0]?.nombre || data.nombre;
+    await asegurarCanal(sql);
     const { leerBaseArchivo, leerWhatsappArchivo } = await import("./callcenter.server");
     const crudas = await leerBaseArchivo(archivo, nombre);
     const agenteHoja = crudas.map((fila) => fila.agente.trim()).find(Boolean) || nombre.replace(/\.[^.]+$/, "");
@@ -1070,9 +1408,9 @@ export const trozoGestiones = createServerFn({ method: "POST" })
     }
     const hechas = await sql.query<{
       id: number; contacto_id: number; fecha: string; hora: string; clasificacion: string; calificacion: string;
-      resultado: string; proxima: string; fecha_proxima: string; observacion_final: string; segundos: number;
+      resultado: string; proxima: string; fecha_proxima: string; observacion_final: string; segundos: number; canal: string;
     }>(
-      `select id, contacto_id, fecha, hora, clasificacion, calificacion, resultado, proxima, fecha_proxima, observacion_final, segundos
+      `select id, contacto_id, fecha, hora, clasificacion, calificacion, resultado, proxima, fecha_proxima, observacion_final, segundos, canal
        from call_gestiones where ciudad_id = $1`,
       [ciudad],
     );
@@ -1120,10 +1458,12 @@ export const trozoGestiones = createServerFn({ method: "POST" })
       if (item.empresa && normalizar(destino.empresa) !== normalizar(item.empresa)) soloPlaca += 1;
       else cruzadas += 1;
       const previas = porContacto.get(destino.id) ?? [];
+      const canal = canalDe(gestion);
       const misma = previas.find((row) =>
         String(row.fecha || "").slice(0, 10) === (gestion.fecha || "") &&
         (row.clasificacion || "") === gestion.clasificacion &&
-        (row.calificacion || "") === gestion.calificacion,
+        (row.calificacion || "") === gestion.calificacion &&
+        (row.canal || "llamada") === canal,
       );
       if (misma) {
         if (gestionIgual(gestion, misma)) iguales += 1;
@@ -1138,7 +1478,7 @@ export const trozoGestiones = createServerFn({ method: "POST" })
       lista.push({
         id, contacto_id: destino.id, fecha: gestion.fecha, hora: ("hora" in gestion ? String(gestion.hora || "") : ""), clasificacion: gestion.clasificacion,
         calificacion: gestion.calificacion, resultado: gestion.resultado, proxima: gestion.proxima,
-        fecha_proxima: gestion.fechaProxima, observacion_final: gestion.observacionFinal, segundos: 0,
+        fecha_proxima: gestion.fechaProxima, observacion_final: gestion.observacionFinal, segundos: 0, canal: canalDe(gestion),
       });
       porContacto.set(destino.id, lista);
       nuevas += 1;
@@ -1422,29 +1762,44 @@ export type SeguimientoCall = {
   proxima: string;
   resultado: string;
   asesor: string;
+  asesorSlug: string;
+  casoId: number | null;
+  origen: string;
   atrasada: boolean;
 };
 
-export const listSeguimiento = createServerFn({ method: "GET" })
+export const listSeguimiento = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .handler(async ({ context }): Promise<SeguimientoCall[]> => {
+  .validator((input: { slug?: string } | undefined) => ({
+    slug: String(input?.slug || "").slice(0, 40),
+  }))
+  .handler(async ({ context, data }): Promise<SeguimientoCall[]> => {
     const profile = await perfilDe(context.userId);
     const sql = await getSql();
     const ciudad = ciudadDe(profile);
     const hoy = hoyBogota();
     const corte = restarDias(hoy, 7);
-    const propio = !veElEquipo(profile.role);
+    let slug = profile.slug;
+    if (veElEquipo(profile.role) && data.slug) {
+      const ok = await sql.query<{ slug: string }>(
+        `select slug from profiles where slug = $1 and role in ('asesor', 'lider') and coalesce(ciudad_id, 1) = $2`,
+        [data.slug, ciudad],
+      );
+      if (ok[0]) slug = ok[0].slug;
+    }
     const rows = await sql.query<{
       id: number; placa: string; nombre: string; telefono: string; propietario: string; tel_propietario: string; cc: string;
       empresa: string; fecha: string; clasificacion: string; calificacion: string; intencion: string; proxima: string;
-      resultado: string; asesor_nombre: string;
+      resultado: string; asesor_nombre: string; asesor_slug: string; caso_id: number | null; origen: string;
     }>(
       `select c.id, c.placa, c.nombre, c.telefono, c.propietario, c.tel_propietario, c.cc, c.empresa,
-              g.fecha, g.clasificacion, g.calificacion, g.intencion, g.proxima, g.resultado, g.asesor_nombre
+              g.fecha, g.clasificacion, g.calificacion, g.intencion, g.proxima, g.resultado, g.asesor_nombre, g.asesor_slug,
+              c.caso_id, coalesce(ca.origen, '') as origen
        from call_contactos c
        join call_gestiones g on g.id = (select max(g2.id) from call_gestiones g2 where g2.contacto_id = c.id)
+       left join casos ca on ca.id = c.caso_id
        where c.ciudad_id = $1
-         and ($2::boolean = false or g.asesor_slug = $3)
+         and g.asesor_slug = $2
          and lower(coalesce(g.proxima, '')) <> 'cerrar'
          and lower(coalesce(g.resultado, '')) not in ('afiliado', 'no afiliado', 'no localizado')
          and (
@@ -1454,7 +1809,7 @@ export const listSeguimiento = createServerFn({ method: "GET" })
          )
        order by g.fecha, c.empresa, c.placa
        limit 200`,
-      [ciudad, propio, profile.slug],
+      [ciudad, slug],
     );
     return rows.map((row) => ({
       id: Number(row.id),
@@ -1472,6 +1827,9 @@ export const listSeguimiento = createServerFn({ method: "GET" })
       proxima: row.proxima,
       resultado: row.resultado,
       asesor: row.asesor_nombre,
+      asesorSlug: row.asesor_slug,
+      casoId: row.caso_id ? Number(row.caso_id) : null,
+      origen: row.origen,
       atrasada: String(row.fecha || "").slice(0, 10) <= corte,
     }));
   });
@@ -1569,25 +1927,74 @@ export async function refrescarBitacoraDia(sql: Sql, ownerId: string, ciudad: nu
   );
 }
 
+async function cerrarProcesoSiToca(sql: Sql, profile: Perfil, fila: FilaContacto, resultado: string, proxima: string) {
+  const res = normalizar(resultado);
+  const prox = normalizar(proxima);
+  const noAfiliado = res.includes("no afiliado");
+  const noLocalizado = res.includes("no localizado");
+  if (!noAfiliado && !noLocalizado && prox !== "cerrar") return { texto: "", casoId: 0 };
+  const motivo = noAfiliado ? "No se afilió" : noLocalizado ? "No localizado" : "Cerrado desde llamar";
+  const hoy = hoyBogota();
+  const candidatos = await sql.query<{ id: number }>(
+    `select ca.id
+     from casos ca
+     where ca.completado = false
+       and btrim(coalesce(ca.motivo_cierre, '')) = ''
+       and (
+         ($1::int <> 0 and ca.id = $1)
+         or (
+           $2 <> ''
+           and upper(regexp_replace(ca.placa, '[^A-Za-z0-9]', '', 'g')) = upper(regexp_replace($2, '[^A-Za-z0-9]', '', 'g'))
+         )
+       )
+     order by case when $1::int <> 0 and ca.id = $1 then 0 when ca.owner_id = $3 then 1 else 2 end, ca.id desc
+     limit 1`,
+    [Number(fila.caso_id) || 0, fila.placa || "", profile.user_id],
+  );
+  const casoId = Number(candidatos[0]?.id) || 0;
+  if (!casoId) return { texto: `Guardé la tipificación de ${fila.placa || "esta placa"}. No tenía un proceso abierto, así que no había uno que cerrar.`, casoId: 0 };
+  await sql.query(
+    `update casos
+     set motivo_cierre = $2,
+         fecha_cierre = case when btrim(coalesce(fecha_cierre, '')) = '' then $3 else fecha_cierre end,
+         updated_at = now()
+     where id = $1 and completado = false and btrim(coalesce(motivo_cierre, '')) = ''`,
+    [casoId, motivo, hoy],
+  );
+  await sql.query(
+    `update call_contactos set caso_id = $2 where id = $1 and coalesce(caso_id, 0) = 0`,
+    [fila.id, casoId],
+  );
+  await sql.query(
+    `update call_gestiones set caso_id = $2 where contacto_id = $1 and coalesce(caso_id, 0) = 0`,
+    [fila.id, casoId],
+  );
+  return { texto: `Cerré el proceso de ${fila.placa || "esta placa"}: ${motivo}. En Procesos queda como No se concretó.`, casoId };
+}
+
 export const guardarLlamada = createServerFn({ method: "POST" })
   .validator((input: LlamadaDraft) => {
     if (!input || !Number.isFinite(Number(input.contactoId))) throw new Error("No hay contacto");
     return input;
   })
   .middleware([authMiddleware])
-  .handler(async ({ context, data }): Promise<{ contacto: ContactoCall | null; aviso: string }> => {
+  .handler(async ({ context, data }): Promise<{ contacto: ContactoCall | null; aviso: string; cerradoId: number }> => {
     const profile = await perfilDe(context.userId);
     if (!llevaProcesos(profile.role)) throw new Error("La tipificación la hace el asesor");
     const clasificacion = texto(data.clasificacion, 80);
     const calificacion = texto(data.calificacion, 80);
     if (!clasificacion || !calificacion) throw new Error("Faltan la clasificación y la calificación");
     const tipo = tipoPersona(texto(data.tipoPersona, 20));
-    const nombre = texto(data.nombre, 120).toUpperCase();
+    const resultadoPlano = normalizar(texto(data.resultado, 80));
+    const proximaPlana = normalizar(texto(data.proxima, 40));
+    const cierraYa = resultadoPlano.includes("no afiliado") || resultadoPlano.includes("no localizado") || proximaPlana === "cerrar";
+    let nombre = texto(data.nombre, 120).toUpperCase();
     const tel = telefonoBase(texto(data.tel, 20));
     const cc = texto(data.cc, 20).replace(/\D/g, "");
+    if (nombre.length < 2 && cierraYa) nombre = "SIN NOMBRE";
     if (nombre.length < 2) throw new Error("Falta el nombre del propietario");
     const laxa = /no contestan|fallas|no se encuentra|equivocado|mensaje/i.test(calificacion);
-    if (tel.length < 7 && !laxa) throw new Error("Falta el teléfono del propietario");
+    if (tel.length < 7 && !laxa && !cierraYa) throw new Error("Falta el teléfono del propietario");
     const tieneNuevo = flag(data.tieneNuevo);
     const nuevoTel = telefonoBase(texto(data.nuevoTel, 20));
     const nuevoNombre = texto(data.nuevoNombre, 120).toUpperCase();
@@ -1598,7 +2005,8 @@ export const guardarLlamada = createServerFn({ method: "POST" })
     const hora = horaBogota();
     const fila = await filaPorId(sql, Number(data.contactoId));
     if (!fila) throw new Error("Ese contacto ya no está");
-    if (!(await puedeVer(sql, ciudad, profile.slug, fila.id, hoy))) throw new Error("Esa empresa no está en tu cola");
+    const suya = await gestionEsSuya(sql, fila.id, profile.slug);
+    if (!suya && !(await puedeVer(sql, ciudad, profile.slug, fila.id, hoy))) throw new Error("Esa placa no es tuya. Solo quien la tipificó puede guardar el seguimiento.");
     const noAplicaProxima = flag(data.noAplicaProxima);
     const noAplicaAfiliacion = flag(data.noAplicaAfiliacion);
     const fechaProxima = noAplicaProxima ? "" : fechaIso(texto(data.fechaProxima, 20));
@@ -1658,6 +2066,8 @@ export const guardarLlamada = createServerFn({ method: "POST" })
       [fila.id, nombre, tel, cc || fila.cc],
     );
     const avisos: string[] = [`Guardado ${fila.placa || fila.nombre}. ${duracionTexto(segundos)}.`];
+    const cierre = await cerrarProcesoSiToca(sql, profile, fila, resultado, gestion.proxima);
+    if (cierre.texto) avisos.push(cierre.texto);
     if (esWhatsapp(gestion.proxima) || /whatsapp/i.test(gestion.observacionFinal) || /whatsapp/i.test(gestion.propietario)) {
       const quien = tieneNuevo && nuevoNombre ? nuevoNombre : nombre || fila.nombre;
       const numero = tieneNuevo && nuevoTel ? nuevoTel : tel || fila.telefono;
@@ -1693,30 +2103,32 @@ export const guardarLlamada = createServerFn({ method: "POST" })
       if (cita[0]) await sql.query(`update call_gestiones set agenda_id = $1 where id = $2`, [cita[0].id, gestionId]);
       avisos.push(`Agendé el ${fechaProxima}.`);
     }
-    const siguiente = data.contactoId
-      ? await sql.query<FilaContacto>(
-          `select c.id, c.empresa, c.nombre, c.estado, c.telefono, c.propietario, c.tel_propietario, c.vehiculo, c.placa, c.anio, c.cc, c.duplicado, c.caso_id, c.orden
-           from call_contactos c
-           where ${visible()} and ${PENDIENTE.replaceAll("$HOY", "$3")} and (c.empresa, c.orden, c.id) > ($4, $5, $6)
-           order by c.empresa, c.orden, c.id limit 1`,
-          [ciudad, profile.slug, hoy, fila.empresa, Number(fila.orden), Number(fila.id)],
-        )
-      : [];
-    const proximaFila = siguiente[0] ?? (await primerPendiente(sql, ciudad, profile.slug, hoy));
+    if (data.sinFicha) return { contacto: null, aviso: avisos.join(" "), cerradoId: cierre.casoId };
+    if (data.quedarse) {
+      const actual = await filaPorId(sql, fila.id);
+      return { contacto: actual ? await armarContacto(sql, ciudad, profile.slug, actual, hoy) : null, aviso: avisos.join(" "), cerradoId: cierre.casoId };
+    }
+    const proximaFila = await pendienteCerca(sql, ciudad, profile.slug, hoy, { empresa: fila.empresa, orden: Number(fila.orden), id: Number(fila.id) })
+      ?? await primerPendiente(sql, ciudad, profile.slug, hoy);
     if (!proximaFila) {
       const actual = await filaPorId(sql, fila.id);
-      return { contacto: actual ? await armarContacto(sql, ciudad, profile.slug, actual, hoy) : null, aviso: `${avisos.join(" ")} No hay más pendientes.` };
+      return { contacto: actual ? await armarContacto(sql, ciudad, profile.slug, actual, hoy) : null, aviso: `${avisos.join(" ")} No hay más pendientes.`, cerradoId: cierre.casoId };
     }
-    return { contacto: await armarContacto(sql, ciudad, profile.slug, proximaFila, hoy), aviso: avisos.join(" ") };
+    return { contacto: await armarContacto(sql, ciudad, profile.slug, proximaFila, hoy), aviso: avisos.join(" "), cerradoId: cierre.casoId };
   });
 
 export const abrirProcesoCall = createServerFn({ method: "POST" })
-  .validator((input: { contactoId: number; nombre: string; cc: string; telefono: string }) => ({
-    contactoId: Number(input.contactoId),
-    nombre: texto(input.nombre, 80),
-    cc: texto(input.cc, 20).replace(/\D/g, ""),
-    telefono: telefonoBase(texto(input.telefono, 20)),
-  }))
+  .validator((input: { contactoId: number; nombre: string; cc: string; telefono: string; origen?: string }) => {
+    const pedido = texto(input?.origen || "", 80);
+    const origen = (ORIGENES as readonly string[]).includes(pedido) ? pedido : "Base de datos (Call)";
+    return {
+      contactoId: Number(input?.contactoId),
+      nombre: texto(input?.nombre, 80),
+      cc: texto(input?.cc, 20).replace(/\D/g, ""),
+      telefono: telefonoBase(texto(input?.telefono, 20)),
+      origen,
+    };
+  })
   .middleware([authMiddleware])
   .handler(async ({ context, data }) => {
     const profile = await perfilDe(context.userId);
@@ -1724,41 +2136,67 @@ export const abrirProcesoCall = createServerFn({ method: "POST" })
     const sql = await getSql();
     const fila = await filaPorId(sql, data.contactoId);
     if (!fila) throw new Error("Ese contacto ya no está");
-    if (fila.caso_id) return { casoId: Number(fila.caso_id), aviso: "Este contacto ya tiene proceso." };
+    if (fila.caso_id) {
+      const vivo = await sql.query<{ id: number }>(
+        `select id from casos
+         where id = $1 and completado = false and btrim(coalesce(motivo_cierre, '')) = ''
+         limit 1`,
+        [fila.caso_id],
+      );
+      if (vivo[0]) {
+        await sql.query(`update casos set origen = $2 where id = $1`, [fila.caso_id, data.origen]);
+        await sql.query(
+          `update call_gestiones set caso_id = $2 where contacto_id = $1 and coalesce(caso_id, 0) = 0`,
+          [fila.id, fila.caso_id],
+        );
+        return { casoId: Number(fila.caso_id), aviso: `Abrí el proceso de ${fila.placa}. Salió de ${data.origen}.` };
+      }
+    }
     if (!fila.placa) throw new Error("Sin placa no se abre el proceso");
     const nombre = (data.nombre || fila.propietario || fila.nombre).trim().toUpperCase().slice(0, 80);
     const telefono = data.telefono || fila.tel_propietario || fila.telefono;
     if (!data.cc || nombre.length < 3 || telefono.length < 7) throw new Error("Para abrir el proceso faltan cédula, nombre y teléfono");
-    const abiertas = await sql.query<{ name: string }>(
-      `select p.name as name from casos c join profiles p on p.user_id = c.owner_id
+    const abiertas = await sql.query<{ id: number; owner_id: string; name: string }>(
+      `select c.id, c.owner_id, p.name as name from casos c join profiles p on p.user_id = c.owner_id
        where upper(c.placa) = $1 and c.completado = false and btrim(c.motivo_cierre) = '' limit 1`,
       [fila.placa],
     );
-    if (abiertas[0]) throw new Error(`La placa ${fila.placa} ya la tiene ${abiertas[0].name} abierta`);
-    const { unificarEmpresa } = await import("./empresas");
-    const empresa = fila.empresa === "SIN EMPRESA" ? "" : unificarEmpresa(fila.empresa);
-    const partes = fila.vehiculo.split(" ").filter(Boolean);
-    const creados = await sql.query<{ id: number }>(
-      `insert into casos (owner_id, placa, cc, nombre, telefono, empresa, origen, fecha_inicio, dijo_si, marca, linea, modelo, ciudad_id)
-       values ($1, $2, $3, $4, $5, $6, 'Base de datos (Call)', $7, false, $8, $9, $10, $11) returning id`,
-      [profile.user_id, fila.placa, data.cc, nombre, telefono, empresa, hoyBogota(), partes[0] ?? "", partes.slice(1).join(" ").slice(0, 40), fila.anio.slice(0, 8), ciudadDe(profile)],
+    if (abiertas[0] && abiertas[0].owner_id !== profile.user_id) {
+      throw new Error(`La placa ${fila.placa} ya la tiene ${abiertas[0].name} abierta`);
+    }
+    let casoId = Number(abiertas[0]?.id) || 0;
+    if (!casoId) {
+      const { unificarEmpresa } = await import("./empresas");
+      const empresa = fila.empresa === "SIN EMPRESA" ? "" : unificarEmpresa(fila.empresa);
+      const partes = fila.vehiculo.split(" ").filter(Boolean);
+      const creados = await sql.query<{ id: number }>(
+        `insert into casos (owner_id, placa, cc, nombre, telefono, empresa, origen, fecha_inicio, dijo_si, marca, linea, modelo, ciudad_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, $11, $12) returning id`,
+        [profile.user_id, fila.placa, data.cc, nombre, telefono, empresa, data.origen, hoyBogota(), partes[0] ?? "", partes.slice(1).join(" ").slice(0, 40), fila.anio.slice(0, 8), ciudadDe(profile)],
+      );
+      casoId = Number(creados[0]?.id) || 0;
+      if (!casoId) throw new Error("No pude abrir el proceso");
+    }
+    await sql.query(`alter table call_contactos add column if not exists cruce text not null default ''`);
+    await sql.query(
+      `update call_contactos set caso_id = $2, cc = $3, propietario = $4, tel_propietario = $5, cruce = case when btrim(cruce) = '' then 'llamar' else cruce end where id = $1`,
+      [fila.id, casoId, data.cc, nombre, telefono],
     );
-    const casoId = Number(creados[0]?.id) || 0;
-    if (!casoId) throw new Error("No pude abrir el proceso");
-    await sql.query(`update call_contactos set caso_id = $2, cc = $3, propietario = $4, tel_propietario = $5 where id = $1`, [fila.id, casoId, data.cc, nombre, telefono]);
     await sql.query(
       `update call_gestiones set caso_id = $2 where contacto_id = $1 and id = (select max(id) from call_gestiones where contacto_id = $1)`,
       [fila.id, casoId],
     );
     const { anotar } = await import("./auditoria.server");
     await anotar(profile, {
-      accion: "creo",
+      accion: abiertas[0] ? "actualizo" : "creo",
       entidad: "proceso",
       entidadId: casoId,
       etiqueta: fila.placa,
-      detalle: `Abrió desde el call center el proceso ${fila.placa} · ${nombre}`,
+      detalle: abiertas[0]
+        ? `Abrió desde llamar el proceso que ya tenía de ${fila.placa}`
+        : `Abrió desde llamar el proceso ${fila.placa} · ${nombre} · ${data.origen}`,
     });
-    return { casoId, aviso: `Abrí el proceso de ${fila.placa}.` };
+    return { casoId, aviso: abiertas[0] ? `Esta placa ya tenía proceso. Lo abrí.` : `Abrí el proceso de ${fila.placa}. Salió de ${data.origen}.` };
   });
 
 export const statsCall = createServerFn({ method: "POST" })
@@ -1772,82 +2210,199 @@ export const statsCall = createServerFn({ method: "POST" })
     if (!veElEquipo(profile.role)) throw new Error("Las estadísticas son de coordinación");
     const sql = await getSql();
     const ciudad = ciudadDe(profile);
+    await asegurarCanal(sql);
+    await sql.query(`alter table call_contactos add column if not exists cruce text not null default ''`);
+    await sql.query(`create index if not exists call_contactos_placa_sola_idx on call_contactos (ciudad_id, placa)`);
     const efectivo = `lower(g.clasificacion) like '%efectivo%' and lower(g.clasificacion) not like '%no efectivo%'`;
     const noEfectivo = `lower(g.clasificacion) like '%no efectivo%'`;
-    // Todas las gestiones de la ciudad. No depende de que la empresa esté activa.
-    const base = `from call_gestiones g left join call_contactos c on c.id = g.contacto_id where g.ciudad_id = $1 and left(g.fecha, 4) >= '2000'`;
-    const porAsesor = await sql.query<{ mes: string; nombre: string; total: number; efectivos: number; no_efectivos: number; segundos: number }>(
-      `select left(g.fecha, 7) as mes, coalesce(nullif(g.asesor_nombre, ''), 'Sin asesor') as nombre, count(*)::int as total,
-              count(*) filter (where ${efectivo})::int as efectivos,
-              count(*) filter (where ${noEfectivo})::int as no_efectivos,
-              coalesce(sum(g.segundos), 0)::int as segundos
-       ${base} group by 1, 2 order by 1, 3 desc`,
-      [ciudad],
-    );
-    const porEmpresa = await sql.query<{ mes: string; empresa: string; total: number; efectivos: number }>(
-      `select left(g.fecha, 7) as mes, coalesce(nullif(c.empresa, ''), 'Sin empresa') as empresa, count(*)::int as total,
-              count(*) filter (where ${efectivo})::int as efectivos
-       ${base} group by 1, 2 order by 1, 3 desc`,
-      [ciudad],
-    );
-    const porCalificacion = await sql.query<{ mes: string; calificacion: string; clasificacion: string; total: number }>(
-      `select left(g.fecha, 7) as mes, coalesce(nullif(g.calificacion, ''), 'Sin calificación') as calificacion,
-              coalesce(nullif(g.clasificacion, ''), '') as clasificacion, count(*)::int as total
-       ${base} group by 1, 2, 3 order by 1, 4 desc`,
-      [ciudad],
-    );
-    const porDia = await sql.query<{ mes: string; fecha: string; total: number; efectivos: number }>(
-      `select left(g.fecha, 7) as mes, left(g.fecha, 10) as fecha, count(*)::int as total,
-              count(*) filter (where ${efectivo})::int as efectivos
-       ${base} group by 1, 2 order by 2`,
-      [ciudad],
-    );
-    const minutos = await sql.query<{ hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; segundos: number }>(
-      `select g.hora, g.asesor_nombre as asesor, coalesce(c.placa, '') as placa, coalesce(c.nombre, g.nombre_prop) as nombre, g.clasificacion, g.segundos
-       from call_gestiones g left join call_contactos c on c.id = g.contacto_id
-       where g.ciudad_id = $1 and left(g.fecha, 10) = $2
-       order by g.hora, g.id`,
-      [ciudad, data.dia],
-    );
+    const real = `
+      and coalesce(g.canal, 'llamada') <> 'whatsapp'
+      and btrim(coalesce(g.clasificacion, '')) <> ''
+      and (
+        not exists (
+          select 1 from call_bases b0
+          where b0.ciudad_id = $1 and b0.nombre <> 'Gestiones fuera de la base' and b0.filas >= 2000
+        )
+        or c.placa in (
+          select c2.placa from call_contactos c2
+          join call_bases b on b.id = c2.base_id
+          where c2.ciudad_id = $1 and c2.placa <> ''
+            and b.nombre <> 'Gestiones fuera de la base' and b.filas >= 2000
+        )
+      )`;
+    const base = `from call_gestiones g join call_contactos c on c.id = g.contacto_id where g.ciudad_id = $1 and left(g.fecha, 4) >= '2000' ${real}`;
+    const [cortesRaw, procesos, placas, minutos] = await Promise.all([
+      sql.query<{
+        fecha: string; asesor: string; empresa: string; clasificacion: string; calificacion: string; intencion: string; resultado: string;
+        total: number; efectivos: number; no_efectivos: number; segundos: number;
+      }>(
+        `select left(g.fecha, 10) as fecha,
+                coalesce(nullif(btrim(g.asesor_nombre), ''), 'Sin asesor') as asesor,
+                coalesce(nullif(btrim(c.empresa), ''), 'Sin empresa') as empresa,
+                coalesce(nullif(btrim(g.clasificacion), ''), 'Sin clasificación') as clasificacion,
+                coalesce(nullif(btrim(g.calificacion), ''), 'Sin calificación') as calificacion,
+                coalesce(nullif(btrim(g.intencion), ''), 'Sin intención') as intencion,
+                coalesce(nullif(btrim(g.resultado), ''), 'Sin resultado') as resultado,
+                count(*)::int as total,
+                count(*) filter (where ${efectivo})::int as efectivos,
+                count(*) filter (where ${noEfectivo})::int as no_efectivos,
+                coalesce(sum(g.segundos), 0)::int as segundos
+         ${base}
+         group by 1, 2, 3, 4, 5, 6, 7`,
+        [ciudad],
+      ),
+      sql.query<{ mes: string; nombre: string; empresa: string; abiertos: number; vinculados: number }>(
+        `select coalesce(left(nullif(ca.fecha_inicio, ''), 7), to_char(ca.created_at at time zone 'America/Bogota', 'YYYY-MM'), 'sin-fecha') as mes,
+                coalesce(nullif(p.name, ''), 'Sin asesor') as nombre,
+                coalesce(nullif(btrim(ca.empresa), ''), 'Sin empresa') as empresa,
+                count(distinct ca.id) filter (where not ca.completado and not ca.tarjeta_entregada and btrim(coalesce(ca.motivo_cierre, '')) = '')::int as abiertos,
+                count(distinct ca.id) filter (where ca.completado or ca.tarjeta_entregada)::int as vinculados
+         from (
+           select distinct on (ca.id) ca.id, ca.fecha_inicio, ca.created_at, ca.completado, ca.tarjeta_entregada, ca.motivo_cierre, ca.owner_id, ca.empresa
+           from call_contactos c
+           join casos ca on ca.id = c.caso_id
+           where c.ciudad_id = $1 and coalesce(c.caso_id, 0) <> 0
+             and (
+               translate(lower(btrim(coalesce(ca.origen, ''))), 'áéíóú', 'aeiou') like 'base de datos%'
+               or (c.cruce = 'llamar' and btrim(coalesce(ca.origen, '')) = '')
+             )
+           order by ca.id
+         ) ca
+         left join profiles p on p.user_id = ca.owner_id
+         group by 1, 2, 3`,
+        [ciudad],
+      ),
+      placasDeLaBase(sql, ciudad, false),
+      sql.query<{ hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; empresa: string; segundos: number }>(
+        `select g.hora, g.asesor_nombre as asesor, coalesce(c.placa, '') as placa, coalesce(c.nombre, g.nombre_prop) as nombre,
+                g.clasificacion, coalesce(nullif(btrim(c.empresa), ''), 'Sin empresa') as empresa, g.segundos
+         from call_gestiones g join call_contactos c on c.id = g.contacto_id
+         where g.ciudad_id = $1 and left(g.fecha, 10) = $2 ${real}
+         order by g.hora, g.id`,
+        [ciudad, data.dia],
+      ),
+    ]);
+    const cortes: CorteCall[] = cortesRaw.map((row) => ({
+      fecha: String(row.fecha || "").slice(0, 10),
+      asesor: row.asesor,
+      empresa: row.empresa,
+      clasificacion: row.clasificacion,
+      calificacion: row.calificacion,
+      intencion: row.intencion,
+      resultado: row.resultado,
+      total: Number(row.total) || 0,
+      efectivos: Number(row.efectivos) || 0,
+      noEfectivos: Number(row.no_efectivos) || 0,
+      segundos: Number(row.segundos) || 0,
+    }));
+    const procesosStat: ProcesoStat[] = procesos.map((row) => ({
+      mes: String(row.mes || "").slice(0, 7),
+      nombre: row.nombre,
+      empresa: row.empresa,
+      abiertos: Number(row.abiertos) || 0,
+      vinculados: Number(row.vinculados) || 0,
+    }));
     const meses = new Map<string, MesCall>();
     const tomar = (mes: string) => {
       const clave = String(mes || "").slice(0, 7);
       let item = meses.get(clave);
       if (!item) {
-        item = { mes: clave, total: 0, efectivos: 0, noEfectivos: 0, segundos: 0, porAsesor: [], porEmpresa: [], porCalificacion: [], porDia: [] };
+        item = { mes: clave, total: 0, efectivos: 0, noEfectivos: 0, segundos: 0, porAsesor: [], porEmpresa: [], porCalificacion: [], porDia: [], efectividad: [] };
         meses.set(clave, item);
       }
       return item;
     };
-    for (const row of porAsesor) {
-      const item = tomar(row.mes);
-      item.total += Number(row.total) || 0;
-      item.efectivos += Number(row.efectivos) || 0;
-      item.noEfectivos += Number(row.no_efectivos) || 0;
-      item.segundos += Number(row.segundos) || 0;
-      item.porAsesor.push({ nombre: row.nombre, total: Number(row.total) || 0, efectivos: Number(row.efectivos) || 0, segundos: Number(row.segundos) || 0 });
+    const sumarEn = <T extends Record<string, string | number>>(lista: T[], clave: string, valor: string, campos: Record<string, number>) => {
+      const fila = lista.find((item) => item[clave] === valor);
+      if (!fila) {
+        lista.push({ [clave]: valor, ...campos } as T);
+        return;
+      }
+      for (const [campo, n] of Object.entries(campos)) fila[campo] = Number(fila[campo] || 0) + n;
+    };
+    for (const row of cortes) {
+      const item = tomar(row.fecha);
+      item.total += row.total;
+      item.efectivos += row.efectivos;
+      item.noEfectivos += row.noEfectivos;
+      item.segundos += row.segundos;
+      sumarEn(item.porAsesor, "nombre", row.asesor, { total: row.total, efectivos: row.efectivos, segundos: row.segundos });
+      sumarEn(item.porEmpresa, "empresa", row.empresa, { total: row.total, efectivos: row.efectivos });
+      const cal = item.porCalificacion.find((fila) => fila.calificacion === row.calificacion && fila.clasificacion === row.clasificacion);
+      if (!cal) item.porCalificacion.push({ calificacion: row.calificacion, clasificacion: row.clasificacion, total: row.total });
+      else cal.total += row.total;
+      sumarEn(item.porDia, "fecha", row.fecha, { total: row.total, efectivos: row.efectivos });
+      const fila = (() => {
+        const lista = item.efectividad;
+        let actual = lista.find((itemFila) => itemFila.nombre === row.asesor);
+        if (!actual) {
+          actual = { nombre: row.asesor, contesto: 0, noInteresado: 0, considera: 0, quiere: 0, enProceso: 0, noAfiliado: 0, noLocalizado: 0, afiliado: 0, procesosAbiertos: 0, vinculados: 0 };
+          lista.push(actual);
+        }
+        return actual;
+      })();
+      const inten = normalizar(row.intencion);
+      const res = normalizar(row.resultado);
+      fila.contesto += row.efectivos;
+      if (inten.includes("no interesado")) fila.noInteresado += row.total;
+      if (inten.includes("considera")) fila.considera += row.total;
+      if (inten.includes("quiere")) fila.quiere += row.total;
+      if (res.includes("en proceso")) fila.enProceso += row.total;
+      if (res.includes("no afiliado")) fila.noAfiliado += row.total;
+      else if (res.includes("afiliado")) fila.afiliado += row.total;
+      if (res.includes("no localizado")) fila.noLocalizado += row.total;
     }
-    for (const row of porEmpresa) tomar(row.mes).porEmpresa.push({ empresa: row.empresa, total: Number(row.total) || 0, efectivos: Number(row.efectivos) || 0 });
-    for (const row of porCalificacion) tomar(row.mes).porCalificacion.push({ calificacion: row.calificacion, clasificacion: row.clasificacion, total: Number(row.total) || 0 });
-    for (const row of porDia) tomar(row.mes).porDia.push({ fecha: String(row.fecha).slice(0, 10), total: Number(row.total) || 0, efectivos: Number(row.efectivos) || 0 });
+    for (const row of procesosStat) {
+      const fila = (() => {
+        const lista = tomar(row.mes).efectividad;
+        let actual = lista.find((itemFila) => itemFila.nombre === row.nombre);
+        if (!actual) {
+          actual = { nombre: row.nombre, contesto: 0, noInteresado: 0, considera: 0, quiere: 0, enProceso: 0, noAfiliado: 0, noLocalizado: 0, afiliado: 0, procesosAbiertos: 0, vinculados: 0 };
+          lista.push(actual);
+        }
+        return actual;
+      })();
+      fila.procesosAbiertos += row.abiertos;
+      fila.vinculados += row.vinculados;
+    }
+    for (const item of meses.values()) {
+      item.porAsesor.sort((a, b) => b.total - a.total);
+      item.porEmpresa.sort((a, b) => b.total - a.total);
+      item.porCalificacion.sort((a, b) => b.total - a.total);
+      item.porDia.sort((a, b) => a.fecha.localeCompare(b.fecha));
+      item.efectividad.sort((a, b) => b.contesto - a.contesto || b.vinculados - a.vinculados);
+    }
     return {
       dia: data.dia,
       meses: [...meses.values()].filter((item) => item.mes).sort((a, b) => a.mes.localeCompare(b.mes)),
+      cortes,
+      procesos: procesosStat,
       minutos: minutos.map((row) => ({
         hora: String(row.hora || "").slice(0, 5),
         asesor: row.asesor || "Sin asesor",
         placa: row.placa,
         nombre: row.nombre,
         clasificacion: row.clasificacion,
+        empresa: row.empresa || "Sin empresa",
         segundos: Number(row.segundos) || 0,
       })),
+      placas,
     };
   });
 
 export const exportarCall = createServerFn({ method: "POST" })
-  .validator((input: { desde?: string; hasta?: string }) => {
+  .validator((input: { desde?: string; hasta?: string; asesor?: string; empresa?: string; clasificacion?: string; calificacion?: string; intencion?: string; resultado?: string }) => {
     const hoy = hoyBogota();
-    return { desde: fechaIso(input?.desde) || `${hoy.slice(0, 8)}01`, hasta: fechaIso(input?.hasta) || hoy };
+    return {
+      desde: fechaIso(input?.desde) || `${hoy.slice(0, 8)}01`,
+      hasta: fechaIso(input?.hasta) || hoy,
+      asesor: texto(input?.asesor, 80),
+      empresa: texto(input?.empresa, 120),
+      clasificacion: texto(input?.clasificacion, 80),
+      calificacion: texto(input?.calificacion, 80),
+      intencion: texto(input?.intencion, 80),
+      resultado: texto(input?.resultado, 80),
+    };
   })
   .middleware([authMiddleware])
   .handler(async ({ context, data }) => {
@@ -1855,6 +2410,14 @@ export const exportarCall = createServerFn({ method: "POST" })
     if (!veElEquipo(profile.role)) throw new Error("La exportación es de coordinación");
     const sql = await getSql();
     const ciudad = ciudadDe(profile);
+    const corte = `
+      and ($4 = '' or coalesce(nullif(btrim(g.asesor_nombre), ''), 'Sin asesor') = $4)
+      and ($5 = '' or coalesce(nullif(btrim(c.empresa), ''), 'Sin empresa') = $5)
+      and ($6 = '' or coalesce(nullif(btrim(g.clasificacion), ''), 'Sin clasificación') = $6)
+      and ($7 = '' or coalesce(nullif(btrim(g.calificacion), ''), 'Sin calificación') = $7)
+      and ($8 = '' or coalesce(nullif(btrim(g.intencion), ''), 'Sin intención') = $8)
+      and ($9 = '' or coalesce(nullif(btrim(g.resultado), ''), 'Sin resultado') = $9)`;
+    const params = [ciudad, data.desde, data.hasta, data.asesor, data.empresa, data.clasificacion, data.calificacion, data.intencion, data.resultado];
     const rows = await sql.query<Record<string, string | number>>(
       `select c.empresa as "EMPRESA", c.nombre as "Nombre completo", c.telefono as "Número de teléfono", c.placa as "Placa",
               c.vehiculo as "Vehículo", c.anio as "Año", g.fecha as "FECHA", g.hora as "HORA", g.asesor_nombre as "AGENTE",
@@ -1866,20 +2429,75 @@ export const exportarCall = createServerFn({ method: "POST" })
               g.observacion_final as "OBSERVACION FINAL"
        from call_gestiones g join call_contactos c on c.id = g.contacto_id
        where g.ciudad_id = $1 and g.fecha >= $2 and g.fecha <= $3
+         and coalesce(g.canal, 'llamada') <> 'whatsapp'
+         and btrim(coalesce(g.clasificacion, '')) <> ''
+         and (
+           not exists (
+             select 1 from call_bases b0
+             where b0.ciudad_id = $1 and b0.nombre <> 'Gestiones fuera de la base' and b0.filas >= 2000
+           )
+           or c.placa in (
+             select c2.placa from call_contactos c2
+             join call_bases b on b.id = c2.base_id
+             where c2.ciudad_id = $1 and c2.placa <> ''
+               and b.nombre <> 'Gestiones fuera de la base' and b.filas >= 2000
+           )
+         )
+         ${corte}
        order by g.fecha, g.hora, g.id`,
-      [ciudad, data.desde, data.hasta],
+      params,
     );
     const resumen = await sql.query<Record<string, string | number>>(
-      `select coalesce(nullif(asesor_nombre, ''), 'Sin asesor') as "Agente", count(*)::int as "Llamadas",
-              count(*) filter (where lower(clasificacion) like '%efectivo%' and lower(clasificacion) not like '%no efectivo%')::int as "Contacto efectivo"
-       from call_gestiones where ciudad_id = $1 and fecha >= $2 and fecha <= $3
+      `select coalesce(nullif(g.asesor_nombre, ''), 'Sin asesor') as "Asesor",
+              count(*) filter (where lower(g.clasificacion) like '%efectivo%' and lower(g.clasificacion) not like '%no efectivo%')::int as "Contestó",
+              count(*) filter (where translate(lower(coalesce(g.intencion, '')), 'áéíóú', 'aeiou') like '%no interesado%')::int as "No interesado",
+              count(*) filter (where translate(lower(coalesce(g.intencion, '')), 'áéíóú', 'aeiou') like '%considera%')::int as "Considera opción",
+              count(*) filter (where translate(lower(coalesce(g.intencion, '')), 'áéíóú', 'aeiou') like '%quiere%')::int as "Quiere afiliarse",
+              count(*) filter (where translate(lower(coalesce(g.resultado, '')), 'áéíóú', 'aeiou') like '%en proceso%')::int as "En proceso de afiliación",
+              count(*) filter (where translate(lower(coalesce(g.resultado, '')), 'áéíóú', 'aeiou') like '%no afiliado%')::int as "No afiliado",
+              count(*) filter (where translate(lower(coalesce(g.resultado, '')), 'áéíóú', 'aeiou') like '%no localizado%')::int as "No localizado",
+              count(*) filter (where translate(lower(coalesce(g.resultado, '')), 'áéíóú', 'aeiou') like '%afiliado%' and translate(lower(coalesce(g.resultado, '')), 'áéíóú', 'aeiou') not like '%no afiliado%')::int as "Afiliado"
+       from call_gestiones g
+       join call_contactos c on c.id = g.contacto_id
+       where g.ciudad_id = $1 and g.fecha >= $2 and g.fecha <= $3 and left(g.fecha, 4) >= '2000'
+         and coalesce(g.canal, 'llamada') <> 'whatsapp'
+         and btrim(coalesce(g.clasificacion, '')) <> ''
+         and (
+           not exists (
+             select 1 from call_bases b0
+             where b0.ciudad_id = $1 and b0.nombre <> 'Gestiones fuera de la base' and b0.filas >= 2000
+           )
+           or c.placa in (
+             select c2.placa from call_contactos c2
+             join call_bases b on b.id = c2.base_id
+             where c2.ciudad_id = $1 and c2.placa <> ''
+               and b.nombre <> 'Gestiones fuera de la base' and b.filas >= 2000
+           )
+         )
+         ${corte}
        group by 1 order by 2 desc`,
-      [ciudad, data.desde, data.hasta],
+      params,
     );
     const { excelGestiones } = await import("./callcenter.server");
+    const placas = (await placasDeLaBase(sql, ciudad)).filter((fila) => {
+      if (fila.fecha && (fila.fecha < data.desde || fila.fecha > data.hasta)) return false;
+      if (data.asesor && fila.asesor !== data.asesor) return false;
+      if (data.empresa && fila.empresa !== data.empresa) return false;
+      return true;
+    });
     const base64 = await excelGestiones(
       rows.map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v == null ? "" : String(v)]))),
       resumen.map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v == null ? "" : String(v)]))),
+      placas.map((fila) => ({
+        Placa: fila.placa,
+        Propietario: fila.nombre,
+        Asesor: fila.asesor,
+        Empresa: fila.empresa,
+        Estado: fila.estado,
+        "Abierto desde": fila.desde,
+        Origen: fila.origen,
+        Fecha: fila.fecha,
+      })),
     );
     return { base64, filename: `llamadas-${data.desde}-a-${data.hasta}.xlsx` };
   });

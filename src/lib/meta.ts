@@ -205,17 +205,15 @@ export function calendarioDe(
   return celdas;
 }
 
-export function resumenMeta(celdas: CeldaMeta[], hoy: string, fechasTocadas?: Iterable<string>) {
-  const extra = new Set(fechasTocadas ?? []);
-  const hastaHoy = celdas.filter((c) => c.labor && (c.iso <= hoy || extra.has(c.iso)));
-  const cubiertos = hastaHoy.filter((c) => c.falta === 0).length;
-  const hechas = hastaHoy.reduce((suma, c) => suma + c.cuenta, 0);
-  const meta = hastaHoy.reduce((suma, c) => suma + c.meta, 0);
+export function resumenMeta(celdas: CeldaMeta[], hoy: string, _fechasTocadas?: Iterable<string>) {
+  const vencidas = celdas.filter((c) => c.labor && c.iso <= hoy);
+  const hechas = celdas.filter((c) => c.iso <= hoy).reduce((suma, c) => suma + c.cuenta, 0);
+  const meta = vencidas.reduce((suma, c) => suma + c.meta, 0);
   return {
-    cubiertos,
-    dias: hastaHoy.length,
+    cubiertos: vencidas.filter((c) => c.falta === 0).length,
+    dias: vencidas.length,
     hechas,
     meta,
-    pct: meta === 0 ? 100 : Math.round((hechas / meta) * 100),
+    pct: meta === 0 ? (hechas > 0 ? 100 : 0) : Math.round((hechas / meta) * 100),
   };
 }

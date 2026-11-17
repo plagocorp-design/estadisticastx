@@ -52,8 +52,9 @@ export function avisoSugerido(caso: {
   areaMarcas?: string;
 }): AvisoTarjetaId {
   if (caso.tarjetaEntregada || caso.opTarjeta === "entregada") return "entregada";
-  if (caso.opTarjeta === "expedida" || caso.estadoTarjeta === "Expedida" || String(caso.areaMarcas ?? "").includes("tarjeta_recibida")) return "empresa";
-  if (caso.opTarjeta === "movilidad") return "movilidad";
+  if (caso.opTarjeta === "expedida" || caso.opTarjeta === "empresa" || caso.estadoTarjeta === "Expedida" || String(caso.areaMarcas ?? "").includes("tarjeta_recibida")) return "empresa";
+  if (caso.opTarjeta === "movilidad" || caso.opTarjeta === "bus") return "movilidad";
+  if (caso.opTarjeta === "radicada" || caso.estadoTarjeta === "Radicada") return "radicada";
   return "radicada";
 }
 

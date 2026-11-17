@@ -55,6 +55,7 @@ export function EnviarFirma({
   cilindraje = "",
   servicio = "PÚBLICO",
   copropietarios = "",
+  nitInicial = "",
   exigir = [],
   onFaltan,
   onEnviado,
@@ -78,12 +79,13 @@ export function EnviarFirma({
   cilindraje?: string;
   servicio?: string;
   copropietarios?: string;
+  nitInicial?: string;
   exigir?: { clave: string; label: string; valor: string }[];
   onFaltan?: (claves: string[]) => void;
   onEnviado?: (id: string) => void;
 }) {
   const [abierto, setAbierto] = useState(false);
-  const [nitAnterior, setNitAnterior] = useState("");
+  const [nitAnterior, setNitAnterior] = useState(nitInicial);
   const [otros] = useState<{ nombre: string; cc: string; correo: string }[]>(() => {
     try {
       const data = JSON.parse(copropietarios) as { nombre?: string; cc?: string; correo?: string }[];
@@ -116,6 +118,10 @@ export function EnviarFirma({
       setEstado("sin_enviar");
     }
   }
+
+  useEffect(() => {
+    if (nitInicial) setNitAnterior(nitInicial);
+  }, [nitInicial]);
 
   useEffect(() => {
     void cargarEstado();

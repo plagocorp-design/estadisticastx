@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { firmarPortal, verPortal } from "@/lib/firma.functions";
 
 function Lienzo({ onChange }: { onChange: (png: string) => void }) {
@@ -130,7 +131,141 @@ function ContratoCompleto({ pdf }: { pdf: string }) {
 }
 
 function piel(r: number, g: number, b: number) {
-  return r > 80 && g > 30 && b > 15 && r > g && r > b && r - g > 12;
+  return r > 95 && g > 40 && b > 20 && r > g && r > b && r - g > 15 && r - b > 15 && r < 250;
+}
+
+function luzDe(r: number, g: number, b: number) {
+  return (r + g + b) / 3;
+}
+
+type Caja = { x: number; y: number; w: number; h: number };
+
+function corrida(mascara: Uint8Array, cols: number, fila: number) {
+  let mejor = 0;
+  let ini = 0;
+  let fin = 0;
+  let actual = 0;
+  let desde = 0;
+  for (let x = 0; x <= cols; x += 1) {
+    const sigue = x < cols && mascara[fila * cols + x] === 1;
+    if (sigue) {
+      if (actual === 0) desde = x;
+      actual += 1;
+    } else if (actual > mejor) {
+      mejor = actual;
+      ini = desde;
+      fin = x - 1;
+      actual = 0;
+    } else actual = 0;
+  }
+  return { n: mejor, ini, fin };
+}
+
+function encajarCara(pieles: Uint8Array, cols: number, filas: number): Caja | null {
+  const tope = Math.floor(filas * 0.7);
+  let semilla = -1;
+  let anchoSemilla = 0;
+  for (let y = 1; y < Math.floor(filas * 0.58); y += 1) {
+    const run = corrida(pieles, cols, y);
+    const parte = run.n / cols;
+    if (parte > 0.16 && parte < 0.55 && run.n > anchoSemilla) {
+      semilla = y;
+      anchoSemilla = run.n;
+    }
+  }
+  if (semilla < 0) return null;
+  const base = corrida(pieles, cols, semilla);
+  let arriba = semilla;
+  let abajo = semilla;
+  let minx = base.ini;
+  let maxx = base.fin;
+  while (arriba > 0) {
+    const run = corrida(pieles, cols, arriba - 1);
+    if (run.n < base.n * 0.42 || run.fin < base.ini - 1 || run.ini > base.fin + 1) break;
+    arriba -= 1;
+    minx = Math.min(minx, run.ini);
+    maxx = Math.max(maxx, run.fin);
+  }
+  while (abajo < tope - 1) {
+    const alto = abajo + 1 - arriba;
+    if (alto > base.n * 1.25) break;
+    const run = corrida(pieles, cols, abajo + 1);
+    if (run.n < base.n * 0.55 || run.fin < base.ini - 1 || run.ini > base.fin + 1) break;
+    abajo += 1;
+    minx = Math.min(minx, run.ini);
+    maxx = Math.max(maxx, run.fin);
+  }
+  const x = Math.max(0, ((minx - 1) / cols) * 100);
+  const y = Math.max(0, ((arriba - 1) / filas) * 100);
+  const w = Math.min(100 - x, ((maxx - minx + 3) / cols) * 100);
+  const h = Math.min(100 - y, ((abajo - arriba + 3) / filas) * 100);
+  if (w < 18 || w > 68 || h < 14 || h > 52) return null;
+  return { x, y, w, h };
+}
+
+function encajarCedula(datos: Uint8ClampedArray, ancho: number, alto: number, cols: number, filas: number, cara: Caja | null): Caja | null {
+  const desde = cara ? Math.floor(((cara.y + cara.h * 0.7) / 100) * filas) : Math.floor(filas * 0.42);
+  const luz = new Uint8Array(cols * filas);
+  const claros = new Uint8Array(cols * filas);
+  for (let fy = 0; fy < filas; fy += 1) {
+    for (let fx = 0; fx < cols; fx += 1) {
+      const x = Math.min(ancho - 1, Math.floor(((fx + 0.5) * ancho) / cols));
+      const y = Math.min(alto - 1, Math.floor(((fy + 0.5) * alto) / filas));
+      const i = (y * ancho + x) * 4;
+      const valor = luzDe(datos[i], datos[i + 1], datos[i + 2]);
+      luz[fy * cols + fx] = Math.min(255, valor);
+      if (fy >= desde && valor > 128 && !piel(datos[i], datos[i + 1], datos[i + 2])) claros[fy * cols + fx] = 1;
+    }
+  }
+  for (let fy = Math.max(0, desde); fy < filas; fy += 1) {
+    let x = 0;
+    while (x < cols) {
+      if (claros[fy * cols + x]) {
+        x += 1;
+        continue;
+      }
+      const hueco = x;
+      while (x < cols && !claros[fy * cols + x]) x += 1;
+      const largo = x - hueco;
+      if (largo > 0 && largo <= 10 && hueco > 0 && x < cols && claros[fy * cols + hueco - 1] && claros[fy * cols + x]) {
+        for (let k = hueco; k < x; k += 1) if (luz[fy * cols + k] > 70) claros[fy * cols + k] = 1;
+      }
+    }
+  }
+  let mejor: { n: number; y: number; ini: number; fin: number } | null = null;
+  for (let y = Math.max(0, desde); y < filas; y += 1) {
+    const run = corrida(claros, cols, y);
+    const parte = run.n / cols;
+    if (parte < 0.2 || parte > 0.8) continue;
+    if (!mejor || run.n > mejor.n) mejor = { n: run.n, y, ini: run.ini, fin: run.fin };
+  }
+  if (!mejor) return null;
+  let arriba = mejor.y;
+  let abajo = mejor.y;
+  let minx = mejor.ini;
+  let maxx = mejor.fin;
+  const sigue = (run: { n: number; ini: number; fin: number }, altoCeldas: number) =>
+    run.n >= mejor!.n * 0.62 && run.fin >= mejor!.ini - 1 && run.ini <= mejor!.fin + 1 && altoCeldas <= mejor!.n * 0.78;
+  while (arriba > desde && sigue(corrida(claros, cols, arriba - 1), abajo - (arriba - 1))) {
+    arriba -= 1;
+    const run = corrida(claros, cols, arriba);
+    minx = Math.min(minx, run.ini);
+    maxx = Math.max(maxx, run.fin);
+  }
+  while (abajo < filas - 1 && sigue(corrida(claros, cols, abajo + 1), abajo + 1 - arriba)) {
+    abajo += 1;
+    const run = corrida(claros, cols, abajo);
+    minx = Math.min(minx, run.ini);
+    maxx = Math.max(maxx, run.fin);
+  }
+  const x = Math.max(0, (minx / cols) * 100);
+  const y = Math.max(0, (arriba / filas) * 100);
+  const w = Math.min(100 - x, ((maxx - minx + 1) / cols) * 100);
+  const h = Math.min(100 - y, ((abajo - arriba + 1) / filas) * 100);
+  const ratio = w / Math.max(h, 1);
+  if (w < 24 || h < 9 || h > 32 || ratio < 1.2 || ratio > 2.35) return null;
+  if (cara && y + h / 2 < cara.y + cara.h) return null;
+  return { x, y, w, h };
 }
 
 function FotoCedula({ onChange }: { onChange: (jpeg: string) => void }) {
@@ -139,7 +274,18 @@ function FotoCedula({ onChange }: { onChange: (jpeg: string) => void }) {
   const [foto, setFoto] = useState("");
   const [cara, setCara] = useState(false);
   const [cedula, setCedula] = useState(false);
+  const [cajaCara, setCajaCara] = useState<Caja | null>(null);
+  const [cajaDoc, setCajaDoc] = useState<Caja | null>(null);
   const [aviso, setAviso] = useState("");
+
+  useEffect(() => {
+    if (!abierta) return;
+    const anterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = anterior;
+    };
+  }, [abierta]);
 
   useEffect(() => {
     if (!abierta) return;
@@ -148,6 +294,10 @@ function FotoCedula({ onChange }: { onChange: (jpeg: string) => void }) {
     const lienzo = document.createElement("canvas");
     const ctx = lienzo.getContext("2d", { willReadFrequently: true });
     let frame = 0;
+    let caraPrev: Caja | null = null;
+    let docPrev: Caja | null = null;
+    let caraHuecos = 0;
+    let docHuecos = 0;
     void navigator.mediaDevices
       .getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
       .then(async (medio) => {
@@ -164,7 +314,7 @@ function FotoCedula({ onChange }: { onChange: (jpeg: string) => void }) {
     const reloj = window.setInterval(() => {
       const medio = video.current;
       if (!medio || !ctx || medio.videoWidth < 20) return;
-      const ancho = 180;
+      const ancho = 120;
       const alto = Math.round((ancho * window.innerHeight) / Math.max(1, window.innerWidth));
       lienzo.width = ancho;
       lienzo.height = alto;
@@ -177,45 +327,49 @@ function FotoCedula({ onChange }: { onChange: (jpeg: string) => void }) {
       ctx.drawImage(medio, (ancho - w) / 2, (alto - h) / 2, w, h);
       ctx.restore();
       const datos = ctx.getImageData(0, 0, ancho, alto).data;
-      const zona = (x0: number, y0: number, x1: number, y1: number) => {
-        let n = 0;
-        let pieles = 0;
-        let suma = 0;
-        let suma2 = 0;
-        let bordes = 0;
-        const ax = Math.max(0, Math.floor(x0 * ancho));
-        const ay = Math.max(0, Math.floor(y0 * alto));
-        const bx = Math.min(ancho - 1, Math.floor(x1 * ancho));
-        const by = Math.min(alto - 1, Math.floor(y1 * alto));
-        for (let y = ay; y < by; y += 2) {
-          for (let x = ax; x < bx; x += 2) {
-            const i = (y * ancho + x) * 4;
-            const r = datos[i];
-            const g = datos[i + 1];
-            const b = datos[i + 2];
-            const luz = (r + g + b) / 3;
-            n += 1;
-            suma += luz;
-            suma2 += luz * luz;
-            if (piel(r, g, b)) pieles += 1;
-            const j = (y * ancho + Math.min(ancho - 1, x + 2)) * 4;
-            bordes += Math.abs(luz - (datos[j] + datos[j + 1] + datos[j + 2]) / 3);
-          }
+      const cols = 36;
+      const filas = Math.max(48, Math.round((cols * alto) / ancho));
+      const pieles = new Uint8Array(cols * filas);
+      for (let fy = 0; fy < filas; fy += 1) {
+        for (let fx = 0; fx < cols; fx += 1) {
+          const x = Math.min(ancho - 1, Math.floor(((fx + 0.5) * ancho) / cols));
+          const y = Math.min(alto - 1, Math.floor(((fy + 0.5) * alto) / filas));
+          const i = (y * ancho + x) * 4;
+          if (piel(datos[i], datos[i + 1], datos[i + 2])) pieles[fy * cols + fx] = 1;
         }
-        const media = n ? suma / n : 0;
-        const variacion = n ? Math.sqrt(Math.max(0, suma2 / n - media * media)) : 0;
-        return { piel: n ? pieles / n : 0, variacion, bordes: n ? bordes / n : 0 };
+      }
+      const suavizar = (prev: Caja | null, next: Caja | null) => {
+        if (!next) return null;
+        if (!prev) return next;
+        const t = 0.45;
+        return {
+          x: prev.x + (next.x - prev.x) * t,
+          y: prev.y + (next.y - prev.y) * t,
+          w: prev.w + (next.w - prev.w) * t,
+          h: prev.h + (next.h - prev.h) * t,
+        };
       };
-      const rostro = zona(0.28, 0.16, 0.62, 0.58);
-      const documento = zona(0.64, 0.22, 0.92, 0.58);
-      const hayCara = rostro.piel > 0.12 && rostro.variacion > 14;
-      const hayCedula = documento.variacion > 22 && documento.bordes > 10 && documento.piel < 0.72;
-      if (hayCara && hayCedula) frame += 1;
+      const caraCaja = encajarCara(pieles, cols, filas);
+      const doc = encajarCedula(datos, ancho, alto, cols, filas, caraCaja);
+      if (caraCaja) {
+        caraPrev = suavizar(caraPrev, caraCaja);
+        caraHuecos = 0;
+      } else if (caraHuecos < 4 && caraPrev) caraHuecos += 1;
+      else caraPrev = null;
+      if (doc) {
+        docPrev = suavizar(docPrev, doc);
+        docHuecos = 0;
+      } else if (docHuecos < 4 && docPrev) docHuecos += 1;
+      else docPrev = null;
+      const orden = Boolean(caraPrev && docPrev && docPrev.y + docPrev.h / 2 > caraPrev.y + caraPrev.h);
+      if (orden) frame += 1;
       else frame = 0;
-      setCara(hayCara);
-      setCedula(hayCedula);
-      if (frame >= 4) setAviso("");
-    }, 280);
+      setCara(Boolean(caraPrev));
+      setCedula(Boolean(docPrev));
+      setCajaCara(caraPrev);
+      setCajaDoc(docPrev);
+      if (frame >= 3) setAviso("");
+    }, 180);
 
     return () => {
       vivo = false;
@@ -251,8 +405,22 @@ function FotoCedula({ onChange }: { onChange: (jpeg: string) => void }) {
     setAbierta(true);
   }
 
-  const listo = cara && cedula;
-  const falta = !cara && !cedula ? "Pon la cara en la silueta y la cédula en el recuadro" : !cara ? "Falta tu cara dentro de la silueta" : !cedula ? "Falta la cédula dentro del recuadro" : "Quédate quieto y toma la foto";
+  const orden = Boolean(cajaCara && cajaDoc && cajaDoc.y + cajaDoc.h / 2 > cajaCara.y + cajaCara.h);
+  const listo = Boolean(cara && cedula && orden);
+  const falta = !cara
+    ? "Pon tu cara frente a la cámara"
+    : !cedula
+      ? "Sostén la cédula debajo de tu cara"
+      : !orden
+        ? "Baja la cédula, debajo de la cara"
+        : "Quédate quieto y toma la foto";
+  const guiaCara = cajaCara ?? { x: 30, y: 8, w: 40, h: 28 };
+  const guiaDoc = cajaDoc ?? {
+    x: Math.max(8, (cajaCara ? cajaCara.x + cajaCara.w / 2 : 50) - 30),
+    y: Math.min(70, cajaCara ? cajaCara.y + cajaCara.h + 4 : 48),
+    w: 60,
+    h: 18,
+  };
 
   return (
     <div className="grid gap-3">
@@ -269,35 +437,48 @@ function FotoCedula({ onChange }: { onChange: (jpeg: string) => void }) {
         </button>
       )}
       {aviso && !abierta ? <p className="text-sm text-red-700">{aviso}</p> : null}
-      {abierta ? (
-        <div className="fixed inset-0 z-50 bg-black">
-          <video ref={video} playsInline muted autoPlay className="h-full w-full object-cover [transform:scaleX(-1)]" />
-          <div className="pointer-events-none absolute inset-0">
-            <div className="absolute top-[16%] left-[28%] h-[42%] w-[34%] rounded-[999px] border-4 border-[#c6e84a] shadow-[0_0_0_9999px_rgba(0,0,0,.35)]" />
-            <div className="absolute top-[22%] left-[64%] h-[36%] w-[26%] rounded-xl border-4 border-white" />
-            <p className="absolute top-[12%] left-[28%] text-sm font-semibold text-white">Tu cara</p>
-            <p className="absolute top-[18%] left-[64%] text-sm font-semibold text-white">Cédula</p>
-          </div>
-          <div className="absolute inset-x-0 bottom-0 grid gap-3 bg-gradient-to-t from-black/80 to-transparent px-5 pt-16 pb-8 text-center">
-            <p className="text-sm font-semibold text-white">{falta}</p>
-            <div className="flex items-center justify-center gap-6">
-              <button type="button" onClick={() => setAbierta(false)} className="h-12 rounded-full px-4 text-sm font-semibold text-white">
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={!listo}
-                onClick={tomar}
-                aria-label="Tomar foto"
-                className="grid size-20 place-items-center rounded-full border-4 border-white disabled:opacity-40"
-              >
-                <span className={"size-14 rounded-full " + (listo ? "bg-[#c6e84a]" : "bg-white/70")} />
-              </button>
-              <span className="w-16" />
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {abierta && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[80] h-[100dvh] w-[100dvw] bg-black">
+              <video ref={video} playsInline muted autoPlay className="h-full w-full object-cover [transform:scaleX(-1)]" />
+              <div className="pointer-events-none absolute inset-0">
+                <div
+                  className={"absolute rounded-[999px] border-4 transition-all duration-150 " + (cara ? "border-[#c6e84a]" : "border-white/50")}
+                  style={{ left: `${guiaCara.x}%`, top: `${guiaCara.y}%`, width: `${guiaCara.w}%`, height: `${guiaCara.h}%` }}
+                />
+                <div
+                  className={"absolute rounded-xl border-4 transition-all duration-150 " + (cedula && orden ? "border-[#c6e84a]" : "border-white")}
+                  style={{ left: `${guiaDoc.x}%`, top: `${guiaDoc.y}%`, width: `${guiaDoc.w}%`, height: `${guiaDoc.h}%` }}
+                />
+                <p className="absolute text-sm font-semibold text-white" style={{ left: `${guiaCara.x}%`, top: `${Math.max(0, guiaCara.y - 4)}%` }}>
+                  Tu cara
+                </p>
+                <p className="absolute text-sm font-semibold text-white" style={{ left: `${guiaDoc.x}%`, top: `${Math.max(0, guiaDoc.y - 4)}%` }}>
+                  Cédula
+                </p>
+              </div>
+              <div className="absolute inset-x-0 bottom-0 grid gap-3 bg-gradient-to-t from-black/80 to-transparent px-5 pt-16 pb-[max(2rem,env(safe-area-inset-bottom))] text-center">
+                <p className="text-sm font-semibold text-white">{falta}</p>
+                <div className="flex items-center justify-center gap-6">
+                  <button type="button" onClick={() => setAbierta(false)} className="h-12 rounded-full px-4 text-sm font-semibold text-white">
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!listo}
+                    onClick={tomar}
+                    aria-label="Tomar foto"
+                    className="grid size-20 place-items-center rounded-full border-4 border-white disabled:opacity-40"
+                  >
+                    <span className={"size-14 rounded-full " + (listo ? "bg-[#c6e84a]" : "bg-white/70")} />
+                  </button>
+                  <span className="w-16" />
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

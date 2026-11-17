@@ -15,6 +15,7 @@ import {
 } from "@/lib/piloto";
 import { configMia } from "@/lib/gerencia.functions";
 import type { LecturaDoc } from "@/lib/ocr";
+import { ladoSugerido, mezclarLectura } from "@/lib/ocr";
 import {
   bajarPaquete,
   borrarDocumento,
@@ -43,10 +44,25 @@ import {
 } from "@/lib/piloto.functions";
 import { configura, esBandeja, etiquetaRol, llevaProcesos, type Role } from "@/lib/team.public";
 import { enviarEnTrozos, prepararArchivo, prepararParaLeer, traerPorTrozos, TOPE_ENVIO } from "@/lib/archivo";
+import { paginasDe } from "@/lib/paginas";
 import { EditorHojas } from "@/components/editor-hojas";
+import { RecortarFoto, esFotoParaRecortar } from "@/components/recortar-foto";
 
 function fallo(err: unknown) {
   return err instanceof Error ? err.message : "No se pudo guardar";
+}
+
+function unirLectura(base: LecturaDoc | null, nueva: LecturaDoc): LecturaDoc {
+  if (!base) return nueva;
+  const keys = new Set(base.campos.map((campo) => campo.key));
+  return {
+    ...nueva,
+    vigencia: base.vigencia !== "sin_fecha" ? base.vigencia : nueva.vigencia,
+    vence: base.vence || nueva.vence,
+    aviso: nueva.aviso || base.aviso,
+    campos: [...base.campos, ...nueva.campos.filter((campo) => !keys.has(campo.key))],
+    extra: { ...base.extra, ...nueva.extra },
+  };
 }
 
 async function traerDocumento(id: number) {
@@ -327,6 +343,7 @@ export function BloquePiloto({
   const [vista, setVista] = useState<{ id: number; nombre: string; archivo: string } | null>(null);
   const [lectura, setLectura] = useState<LecturaDoc | null>(null);
   const [editor, setEditor] = useState<{ id: string; nombre: string; src: string }[] | null>(null);
+  const [colaFoto, setColaFoto] = useState<{ id: string; file: File; reemplazaId?: number; tipoDoc?: string }[]>([]);
   const [etiquetas, setEtiquetas] = useState<Record<string, string>>({});
   const [pasosOn, setPasosOn] = useState<Record<string, boolean>>({});
   const [textoOperativa, setTextoOperativa] = useState("Enviar a operativa");
@@ -462,32 +479,65 @@ export function BloquePiloto({
         }
       }
       let leida: LecturaDoc | null = null;
-      if (paraLeer.archivo.length <= 8_000_000) {
-        try {
-          leida = await leerDocumento({ data: { tipo: elegido, nombre: paraLeer.nombre, archivo: paraLeer.archivo, actual } });
-        } catch (err) {
-          leida = {
-            vigencia: "sin_fecha",
-            vence: "",
-            aviso: err instanceof Error ? err.message : "No pude leer la foto",
-            campos: [],
-          };
+      const esPdfArchivo = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      const vivo = { ...actual };
+      const usados = new Set<string>();
+      let extraLeido: Record<string, string> = {};
+      try {
+        const fuentes = esPdfArchivo || file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name)
+          ? (await paginasDe(file)).paginas.slice(0, 4)
+          : paraLeer.archivo.length <= 8_000_000
+            ? [paraLeer]
+            : [];
+        for (const pagina of fuentes) {
+          const paginaLeida = await leerDocumento({
+            data: { tipo: elegido, nombre: pagina.nombre, archivo: pagina.archivo, actual: vivo },
+          });
+          const claves = Object.entries(paginaLeida.datos ?? {})
+            .filter(([, valor]) => String(valor ?? "").trim())
+            .map(([key]) => key);
+          const tipoPagina = ladoSugerido(claves.length ? claves : paginaLeida.campos.map((campo) => campo.key), usados, elegido);
+          if (tipoPagina) usados.add(tipoPagina);
+          const mix = mezclarLectura(vivo, paginaLeida, tipoPagina || elegido);
+          Object.assign(vivo, mix.valores);
+          extraLeido = { ...extraLeido, ...mix.extra };
+          leida = unirLectura(leida, paginaLeida);
         }
+      } catch (err) {
+        leida = leida ?? {
+          vigencia: "sin_fecha",
+          vence: "",
+          aviso: err instanceof Error ? err.message : "No pude leer el documento",
+          campos: [],
+        };
       }
       if (leida) {
         const patch: Partial<Caso> = {};
         const choques: LecturaDoc["campos"] = [];
+        for (const key of ["placa", "cc", "nombre", "empresa", "marca", "linea", "modelo", "capacidad", "clase", "carroceria", "motor", "serie", "cilindraje", "servicio", "direccion", "correo"] as const) {
+          const nuevo = String(vivo[key] ?? "").trim();
+          const previo = String(actual[key] ?? "").trim();
+          if (nuevo && nuevo !== previo) patch[key] = nuevo;
+        }
         for (const campo of leida.campos) {
-          if (!String(actual[campo.key] ?? "").trim()) patch[campo.key] = campo.leido;
-          else choques.push(campo);
+          if (patch[campo.key] === undefined && String(actual[campo.key] ?? "").trim() && String(actual[campo.key]) !== campo.leido) choques.push(campo);
+        }
+        if (Object.keys(extraLeido).length) {
+          let mapa: Record<string, string> = {};
+          try {
+            const crudo = JSON.parse(caso.datosExtra || "{}") as Record<string, string>;
+            if (crudo && typeof crudo === "object") mapa = crudo;
+          } catch {
+            mapa = {};
+          }
+          patch.datosExtra = JSON.stringify({ ...mapa, ...extraLeido });
         }
         if (Object.keys(patch).length) onCaso(patch);
-        const etiquetasLlenas = leida.campos.filter((campo) => campo.key in patch).map((campo) => campo.label);
         leida = {
           ...leida,
           campos: choques,
-          aviso: etiquetasLlenas.length
-            ? `Llené ${etiquetasLlenas.join(", ")} con la foto.${choques.length ? " Confirma lo que no coincidía." : ""}`
+          aviso: Object.keys(patch).length
+            ? `Llené el formulario: ${[patch.placa, patch.nombre, patch.cc, patch.marca, patch.linea, patch.empresa].filter(Boolean).join(" · ")}.`
             : leida.aviso,
         };
       }
@@ -536,7 +586,7 @@ export function BloquePiloto({
     await cargar();
   }
 
-  async function cambiar(id: number, file: File) {
+  async function cambiar(id: number, file: File, tipoDoc?: string) {
     if (file.size > 30 * 1024 * 1024) {
       onError("El archivo pesa más de 30 MB");
       return;
@@ -545,11 +595,46 @@ export function BloquePiloto({
     const cargaId = crypto.randomUUID();
     await enviarEnTrozos(listo.archivo, async (orden, datos, fin) => {
       await recibirTrozo({
-        data: { cargaId, orden, datos, fin, casoId: caso.id, tipo, nombre: listo.nombre, reemplazaId: id },
+        data: { cargaId, orden, datos, fin, casoId: caso.id, tipo: tipoDoc || tipo, nombre: listo.nombre, reemplazaId: id },
       });
     });
     setVista(null);
     await cargar();
+  }
+
+  function encolarFotos(files: File[], reemplazaId?: number, tipoDoc?: string) {
+    const fotos = files.filter(esFotoParaRecortar);
+    const otros = files.filter((item) => !esFotoParaRecortar(item));
+    for (const item of otros) {
+      if (reemplazaId) void correr(() => cambiar(reemplazaId, item, tipoDoc));
+      else void subir(item);
+    }
+    if (!fotos.length) return;
+    setColaFoto((actual) => [
+      ...actual,
+      ...fotos.map((item) => ({ id: crypto.randomUUID(), file: item, reemplazaId, tipoDoc })),
+    ]);
+  }
+
+  function fotoLista(file: File) {
+    const pendiente = colaFoto[0];
+    if (!pendiente) return;
+    setColaFoto((actual) => actual.slice(1));
+    if (pendiente.reemplazaId) void correr(() => cambiar(pendiente.reemplazaId!, file, pendiente.tipoDoc));
+    else void subir(file);
+  }
+
+  function saltarFoto() {
+    setColaFoto((actual) => actual.slice(1));
+  }
+
+  async function pedirRecorte(doc: DocItem) {
+    const file = await traerDocumento(doc.id);
+    const bytes = bytesDe(file.archivo);
+    if (!esFoto(file.nombre, bytes)) throw new Error("Solo se recortan fotos. El PDF se deja completo.");
+    const mime = file.nombre.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+    const foto = new File([bytes], file.nombre, { type: mime });
+    setColaFoto((actual) => [...actual, { id: crypto.randomUUID(), file: foto, reemplazaId: doc.id, tipoDoc: doc.tipo }]);
   }
 
   const ocultos = new Set(caso.docsOcultos.split(",").filter(Boolean));
@@ -655,8 +740,8 @@ export function BloquePiloto({
               </div>
               <p className="text-sm text-ink-soft">
                 {modo === "paquete"
-                  ? "Un solo archivo con todos los documentos. Foto o PDF, hasta 30 MB."
-                  : "Elige cuál es y súbelo. Puedes repetir con el siguiente. Foto o PDF, hasta 30 MB."}
+                  ? "Un solo archivo con todos los documentos. Si es foto, primero la recortas. Hasta 30 MB."
+                  : "Elige cuál es y súbelo. Si es foto, primero la recortas. Puedes repetir con el siguiente. Hasta 30 MB."}
               </p>
               <div className="flex flex-wrap gap-2">
                 {modo === "uno" ? (
@@ -676,7 +761,7 @@ export function BloquePiloto({
                     onChange={(e) => {
                       const files = [...(e.target.files ?? [])];
                       e.target.value = "";
-                      for (const file of files) void subir(file);
+                      if (files.length) encolarFotos(files);
                     }}
                   />
                 </label>
@@ -690,11 +775,23 @@ export function BloquePiloto({
                     for (const doc of docs) {
                       const file = await traerDocumento(doc.id);
                       const bytes = bytesDe(file.archivo);
+                      if (esPdf(file.nombre, bytes)) {
+                        const pdf = new File([bytes], file.nombre.toLowerCase().endsWith(".pdf") ? file.nombre : `${file.nombre}.pdf`, { type: "application/pdf" });
+                        const partes = await paginasDe(pdf);
+                        partes.paginas.forEach((pagina, indice) => {
+                          cargadas.push({
+                            id: `${doc.id}-p${indice}`,
+                            nombre: `${nombreDe(doc.tipo)} · página ${indice + 1}`,
+                            src: `data:image/jpeg;base64,${pagina.archivo}`,
+                          });
+                        });
+                        continue;
+                      }
                       if (!esFoto(file.nombre, bytes)) continue;
                       const mime = file.nombre.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
                       cargadas.push({ id: String(doc.id), nombre: `${nombreDe(doc.tipo)} · ${file.nombre}`, src: `data:${mime};base64,${file.archivo}` });
                     }
-                    if (!cargadas.length) throw new Error("No hay fotos para acomodar. Sube cada documento en foto. Los PDF se quedan como están.");
+                    if (!cargadas.length) throw new Error("No hay fotos ni PDF para acomodar.");
                     setEditor(cargadas);
                   })
                 }
@@ -771,6 +868,15 @@ export function BloquePiloto({
                       >
                         Girar
                       </button>
+                      {!doc.nombre.toLowerCase().endsWith(".pdf") ? (
+                        <button
+                          type="button"
+                          className="h-9 rounded-xl border border-line px-3"
+                          onClick={() => void correr(() => pedirRecorte(doc))}
+                        >
+                          Recortar
+                        </button>
+                      ) : null}
                       <label className="inline-flex h-9 cursor-pointer items-center rounded-xl border border-line px-3">
                         Cambiar
                         <input
@@ -780,7 +886,7 @@ export function BloquePiloto({
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             e.target.value = "";
-                            if (file) void correr(() => cambiar(doc.id, file));
+                            if (file) encolarFotos([file], doc.id, doc.tipo);
                           }}
                         />
                       </label>
@@ -828,6 +934,17 @@ export function BloquePiloto({
               }}
             />
           ) : null}
+          {colaFoto[0] ? (
+            <RecortarFoto
+              key={colaFoto[0].id}
+              file={colaFoto[0].file}
+              indice={1}
+              total={colaFoto.length}
+              onListo={fotoLista}
+              onCancelar={saltarFoto}
+              onCancelarTodas={() => setColaFoto([])}
+            />
+          ) : null}
           {vista ? (
             <div className="fixed inset-0 z-40 grid place-items-center bg-ink/50 p-4" onClick={() => setVista(null)}>
               <div className="grid max-h-[90vh] w-full max-w-3xl gap-3 overflow-auto rounded-card bg-card p-4" onClick={(e) => e.stopPropagation()}>
@@ -848,6 +965,18 @@ export function BloquePiloto({
                       <button type="button" className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold" onClick={() => void correr(() => girar(vista.id, docs.find((doc) => doc.id === vista.id)?.tipo || "cedula", vista.nombre, vista.archivo))}>
                         Girar
                       </button>
+                      {esFoto(vista.nombre, bytesDe(vista.archivo)) ? (
+                        <button
+                          type="button"
+                          className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold"
+                          onClick={() => {
+                            const doc = docs.find((item) => item.id === vista.id);
+                            if (doc) void correr(() => pedirRecorte(doc));
+                          }}
+                        >
+                          Recortar
+                        </button>
+                      ) : null}
                       <button type="button" className="h-10 rounded-2xl px-3 text-sm font-semibold text-danger" onClick={() => void correr(() => quitar(vista.id))}>
                         Borrar
                       </button>

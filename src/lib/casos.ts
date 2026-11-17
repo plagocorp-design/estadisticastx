@@ -21,7 +21,15 @@ export const STEPS = [
 
 export type StepKey = (typeof STEPS)[number]["key"];
 
-export const ORIGENES = ["Trabajo de campo", "Base de datos (Call)", "Referido"] as const;
+export const ORIGENES = [
+  "Trabajo de campo",
+  "Base de datos (Call)",
+  "Referido",
+  "Presencial operativa",
+  "Servicio al cliente",
+  "Vía seguros",
+  "Extensión",
+] as const;
 
 export type Caso = {
   id: number;
@@ -115,6 +123,7 @@ export type CasoDraft = {
   firmaContrato?: boolean;
   ownerSlug?: string;
   copropietarios?: string;
+  datosExtra?: string;
 };
 
 export function otrosPropietarios(value: unknown) {
