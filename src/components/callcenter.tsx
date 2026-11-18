@@ -853,20 +853,6 @@ const COLUMNAS_EFECTO: { clave: (typeof CLAVES_EFECTO)[number]; label: string }[
   { clave: "vinculados", label: "Vinculados Call" },
 ];
 
-function sumarEfectividad(lista: { efectividad?: EfectividadFila[] }[]) {
-  const mapa = new Map<string, EfectividadFila>();
-  for (const mes of lista) {
-    for (const fila of mes.efectividad ?? []) {
-      const actual = mapa.get(fila.nombre) ?? {
-        nombre: fila.nombre, contesto: 0, noInteresado: 0, considera: 0, quiere: 0, enProceso: 0, noAfiliado: 0, noLocalizado: 0, afiliado: 0, procesosAbiertos: 0, vinculados: 0,
-      };
-      for (const clave of CLAVES_EFECTO) actual[clave] += fila[clave] || 0;
-      mapa.set(fila.nombre, actual);
-    }
-  }
-  return [...mapa.values()].sort((a, b) => b.contesto - a.contesto || b.vinculados - a.vinculados);
-}
-
 function TablaEfectividad({ filas }: { filas: EfectividadFila[] }) {
   const total = (clave: (typeof CLAVES_EFECTO)[number]) => filas.reduce((suma, fila) => suma + (fila[clave] || 0), 0);
   return (
@@ -1147,6 +1133,9 @@ function Estadisticas({ onError, onProceso }: { onError: (t: string) => void; on
     if (asesor && row.asesor !== asesor) return false;
     if (empresa && row.empresa !== empresa) return false;
     if (clasificacion && row.clasificacion !== clasificacion) return false;
+    if (calificacion && row.calificacion !== calificacion) return false;
+    if (intencion && row.intencion !== intencion) return false;
+    if (resultado && row.resultado !== resultado) return false;
     return true;
   });
   const hayFiltro = mes !== "todos" || Boolean(asesor || empresa || clasificacion || calificacion || intencion || resultado);
@@ -1294,7 +1283,7 @@ function Estadisticas({ onError, onProceso }: { onError: (t: string) => void; on
         <PlacasBase placas={placas} campana mes={mes === "todos" ? hoy.slice(0, 7) : mes} onProceso={onProceso} />
       </Panel>
 
-      <Panel titulo="Minuto a minuto" nota="Es un solo día. Asesor, empresa y clasificación sí lo cortan. El 0:00 es porque el Excel no trae duración.">
+      <Panel titulo="Minuto a minuto" nota="Es un solo día. Los filtros de arriba también lo cortan. El 0:00 es porque el Excel no trae duración.">
         <label className="text-sm font-semibold">Día
           <input type="date" value={dia} onChange={(e) => { setDia(e.target.value); cargar(e.target.value); }} className="mt-1 h-11 w-full rounded-2xl border border-line px-3 font-normal" />
         </label>

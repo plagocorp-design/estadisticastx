@@ -1018,7 +1018,7 @@ export type ProcesoStat = {
 export type StatsCall = {
   meses: MesCall[];
   dia: string;
-  minutos: { hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; empresa: string; segundos: number }[];
+  minutos: { hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; calificacion: string; intencion: string; resultado: string; empresa: string; segundos: number }[];
   placas: PlacaDeBase[];
   cortes: CorteCall[];
   procesos: ProcesoStat[];
@@ -2273,9 +2273,13 @@ export const statsCall = createServerFn({ method: "POST" })
         [ciudad],
       ),
       placasDeLaBase(sql, ciudad, false),
-      sql.query<{ hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; empresa: string; segundos: number }>(
-        `select g.hora, g.asesor_nombre as asesor, coalesce(c.placa, '') as placa, coalesce(c.nombre, g.nombre_prop) as nombre,
-                g.clasificacion, coalesce(nullif(btrim(c.empresa), ''), 'Sin empresa') as empresa, g.segundos
+      sql.query<{ hora: string; asesor: string; placa: string; nombre: string; clasificacion: string; calificacion: string; intencion: string; resultado: string; empresa: string; segundos: number }>(
+        `select g.hora, coalesce(nullif(btrim(g.asesor_nombre), ''), 'Sin asesor') as asesor, coalesce(c.placa, '') as placa, coalesce(c.nombre, g.nombre_prop) as nombre,
+                coalesce(nullif(btrim(g.clasificacion), ''), 'Sin clasificación') as clasificacion,
+                coalesce(nullif(btrim(g.calificacion), ''), 'Sin calificación') as calificacion,
+                coalesce(nullif(btrim(g.intencion), ''), 'Sin intención') as intencion,
+                coalesce(nullif(btrim(g.resultado), ''), 'Sin resultado') as resultado,
+                coalesce(nullif(btrim(c.empresa), ''), 'Sin empresa') as empresa, g.segundos
          from call_gestiones g join call_contactos c on c.id = g.contacto_id
          where g.ciudad_id = $1 and left(g.fecha, 10) = $2 ${real}
          order by g.hora, g.id`,
@@ -2318,7 +2322,8 @@ export const statsCall = createServerFn({ method: "POST" })
         lista.push({ [clave]: valor, ...campos } as T);
         return;
       }
-      for (const [campo, n] of Object.entries(campos)) fila[campo] = Number(fila[campo] || 0) + n;
+      const destino = fila as Record<string, string | number>;
+      for (const [campo, n] of Object.entries(campos)) destino[campo] = Number(destino[campo] || 0) + n;
     };
     for (const row of cortes) {
       const item = tomar(row.fecha);
@@ -2383,6 +2388,9 @@ export const statsCall = createServerFn({ method: "POST" })
         placa: row.placa,
         nombre: row.nombre,
         clasificacion: row.clasificacion,
+        calificacion: row.calificacion,
+        intencion: row.intencion,
+        resultado: row.resultado,
         empresa: row.empresa || "Sin empresa",
         segundos: Number(row.segundos) || 0,
       })),
