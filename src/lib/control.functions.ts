@@ -951,20 +951,31 @@ export const guardarAcceso = createServerFn({ method: "POST" })
     if (!profile || !configura(profile.role)) throw new Error("Solo quien configura cambia el acceso");
     const acceso = accesoDe("asesor", JSON.stringify(data.acceso));
     if (acceso.secciones.length === 0) throw new Error("Elige al menos una sección");
-    let rol = rolDeAcceso(acceso);
-    if (data.slug === "david") {
-      rol = "lider";
-      acceso.poderes = ["propios", "ver_equipo", "configurar"];
-      acceso.area = "";
-    }
     const sql = await getSql();
     await sql.query(`alter table profiles add column if not exists acceso text not null default ''`);
-    const changed = await sql.query<{ slug: string }>(
-      `update profiles set role = $1, acceso = $2 where slug = $3 returning slug`,
-      [rol, accesoJson(acceso), data.slug],
+    const gente = await sql.query<{ user_id: string; slug: string; role: string }>(
+      `select user_id, slug, role from profiles where slug = $1`,
+      [data.slug],
     );
-    if (!changed[0]) throw new Error("No encontré a esa persona");
-    return { ok: true };
+    if (gente.length !== 1) throw new Error(gente.length === 0 ? "No encontré a esa persona" : "Hay más de un perfil con ese usuario. No cambié a nadie.");
+    const persona = gente[0];
+    if (persona.role === "gerencia") {
+      const completo = accesoDe("gerencia", "");
+      await sql.query(`update profiles set acceso = $1 where user_id = $2 and role = 'gerencia'`, [accesoJson(completo), persona.user_id]);
+      return { ok: true, slug: persona.slug };
+    }
+    if (persona.slug === "david") {
+      const completo = accesoDe("lider", "");
+      await sql.query(`update profiles set role = 'lider', acceso = $1 where user_id = $2 and slug = 'david'`, [accesoJson(completo), persona.user_id]);
+      return { ok: true, slug: persona.slug };
+    }
+    const rol = rolDeAcceso(acceso);
+    const changed = await sql.query<{ slug: string }>(
+      `update profiles set role = $1, acceso = $2 where user_id = $3 and slug = $4 returning slug`,
+      [rol, accesoJson(acceso), persona.user_id, persona.slug],
+    );
+    if (changed.length !== 1) throw new Error("No pude guardar el acceso de esa persona");
+    return { ok: true, slug: persona.slug };
   });
 
 export const cambiarClave = createServerFn({ method: "POST" })

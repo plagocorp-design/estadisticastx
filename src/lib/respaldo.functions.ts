@@ -1,7 +1,13 @@
-import { createServerFn } from "@tanstack/react-start";
-import { authMiddleware } from "@/lib/auth/middleware";
-import { getSql } from "@/lib/db";
+import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import type { Sql } from "@/lib/db";
 import { hoyBogota } from "@/lib/casos";
+
+export type ResumenRespaldo = {
+  tablas: number;
+  filas: number;
+  archivos: number;
+  faltan: number;
+};
 
 function texto(valor: string) {
   let marca = "vl";
@@ -25,44 +31,119 @@ function identificador(nombre: string) {
   return `"${nombre}"`;
 }
 
-export const exportarSql = createServerFn({ method: "GET" })
-  .middleware([authMiddleware])
-  .handler(async ({ context }) => {
-    const { profileFor } = await import("./team.server");
-    const profile = await profileFor(context.userId);
-    if (!profile || (profile.role !== "lider" && profile.role !== "gerencia")) {
-      throw new Error("Solo el líder descarga la base completa");
+function tablaDe(reg: string) {
+  const sinEsquema = reg.includes(".") ? reg.slice(reg.lastIndexOf(".") + 1) : reg;
+  return sinEsquema.replace(/"/g, "");
+}
+
+function ordenDeInsercion(nombres: string[], fks: { child: string; parent: string }[]) {
+  const pendientes = new Set(nombres);
+  const padres = new Map<string, Set<string>>();
+  for (const nombre of nombres) padres.set(nombre, new Set());
+  for (const fk of fks) {
+    const hijo = tablaDe(fk.child);
+    const padre = tablaDe(fk.parent);
+    if (hijo === padre || !pendientes.has(hijo) || !pendientes.has(padre)) continue;
+    padres.get(hijo)?.add(padre);
+  }
+  const orden: string[] = [];
+  while (pendientes.size) {
+    const libres = [...pendientes]
+      .filter((nombre) => [...(padres.get(nombre) ?? [])].every((padre) => !pendientes.has(padre)))
+      .sort();
+    if (!libres.length) {
+      orden.push(...[...pendientes].sort());
+      break;
     }
-    const sql = await getSql();
-    const tablas = await sql.query<{ table_name: string }>(
-      `select table_name from information_schema.tables
-       where table_schema = 'public' and table_type = 'BASE TABLE'
-       order by table_name`,
-    );
-    const nombres = tablas.map((tabla) => tabla.table_name).filter((nombre) => /^[a-z_][a-z0-9_]*$/i.test(nombre));
-    const lineas: string[] = [
-      "-- Vincula Libre. Respaldo completo, con PDF, firmas, llamadas, usuarios y lo demás.",
-      "-- Primero carga vincula-libre-estructura.sql en una base vacía.",
-      "-- Después corre este archivo con el usuario dueño de las tablas.",
-      "BEGIN;",
-      "SET session_replication_role = replica;",
-      `TRUNCATE ${nombres.map(identificador).join(", ")} RESTART IDENTITY CASCADE;`,
-    ];
-    let filasTotal = 0;
-    for (const nombre of nombres) {
-      const filas = await sql.query<Record<string, unknown>>(`select * from ${identificador(nombre)}`);
-      filasTotal += filas.length;
-      lineas.push(`-- ${nombre}: ${filas.length}`);
-      for (const fila of filas) {
-        const columnas = Object.keys(fila);
-        if (!columnas.length) continue;
-        const valores = columnas.map((columna) => literal(fila[columna]));
-        lineas.push(
-          `INSERT INTO ${identificador(nombre)} (${columnas.map(identificador).join(", ")}) VALUES (${valores.join(", ")});`,
-        );
+    for (const nombre of libres) {
+      orden.push(nombre);
+      pendientes.delete(nombre);
+    }
+  }
+  return orden;
+}
+
+function esquema() {
+  const archivos = import.meta.glob("/migrations/*.sql", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+  const piezas = ["-- Estructura. Sale de las migraciones, no de un SQL viejo."];
+  for (const { name, path } of pendingMigrations(Object.keys(archivos), [])) {
+    piezas.push(`-- ===== ${name} =====`);
+    piezas.push(archivos[path] ?? "");
+  }
+  return piezas.join("\n");
+}
+
+export function nombreRespaldo() {
+  return `vincula-libre-todo-${hoyBogota()}.sql`;
+}
+
+/** Un solo SQL: tablas vacías + cada fila + los PDF que estaban en la nube. */
+export async function* lineasRespaldo(sql: Sql): AsyncGenerator<string, ResumenRespaldo> {
+  const tablas = await sql.query<{ table_name: string }>(
+    `select table_name from information_schema.tables
+     where table_schema = 'public' and table_type = 'BASE TABLE'
+     order by table_name`,
+  );
+  const nombres = tablas.map((tabla) => tabla.table_name).filter((nombre) => /^[a-z_][a-z0-9_]*$/i.test(nombre));
+  const fks = await sql.query<{ child: string; parent: string }>(
+    `select c.conrelid::regclass::text as child, c.confrelid::regclass::text as parent
+     from pg_constraint c
+     join pg_namespace n on n.oid = c.connamespace
+     where c.contype = 'f' and n.nspname = 'public'`,
+  );
+  const orden = ordenDeInsercion(nombres, fks);
+  const resumen: ResumenRespaldo = { tablas: orden.length, filas: 0, archivos: 0, faltan: 0 };
+  yield [
+    "-- Vincula Libre. Backup completo.",
+    "-- Trae la estructura, los datos y los archivos que estaban en OBS o Drive.",
+    "-- En una base vacía, con la connection string directa:",
+    "--   psql \"postgresql://...\" -v ON_ERROR_STOP=1 -f este-archivo.sql",
+    "-- Sirve si la última línea dice -- FIN. Si dice -- CORTE, no lo uses.",
+    "",
+    esquema(),
+    "",
+    "BEGIN;",
+    orden.length ? `TRUNCATE ${orden.map(identificador).join(", ")} RESTART IDENTITY CASCADE;` : "-- sin tablas",
+    "",
+  ].join("\n") + "\n";
+
+  const { leerDeDrive } = await import("./drive.server");
+  for (const nombre of orden) {
+    const filas = await sql.query<Record<string, unknown>>(`select * from ${identificador(nombre)}`);
+    yield `-- ${nombre}: ${filas.length}\n`;
+    resumen.filas += filas.length;
+    for (const fila of filas) {
+      if (nombre === "documentos") {
+        const archivo = typeof fila.archivo === "string" ? fila.archivo.trim() : "";
+        const drive = typeof fila.drive_id === "string" ? fila.drive_id.trim() : "";
+        if (!archivo && drive) {
+          let bajado = "";
+          try {
+            bajado = await leerDeDrive(drive);
+          } catch {
+            bajado = "";
+          }
+          if (bajado) {
+            fila.archivo = bajado;
+            resumen.archivos += 1;
+          } else {
+            resumen.faltan += 1;
+            yield `-- FALTA documento ${String(fila.id ?? "")} ${drive}\n`;
+          }
+        }
       }
+      const columnas = Object.keys(fila);
+      if (!columnas.length) continue;
+      const valores = columnas.map((columna) => literal(fila[columna]));
+      yield `INSERT INTO ${identificador(nombre)} (${columnas.map(identificador).join(", ")}) VALUES (${valores.join(", ")});\n`;
     }
-    lineas.push(`
+  }
+
+  yield `
 DO $$
 DECLARE r record;
 DECLARE seq text;
@@ -77,19 +158,8 @@ BEGIN
       EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM %I.%I), 1), true)', seq, r.column_name, 'public', r.table_name);
     END IF;
   END LOOP;
-END $$;`);
-    lineas.push("SET session_replication_role = origin;");
-    lineas.push("COMMIT;");
-    const cuerpo = lineas.join("\n");
-    const { anotar } = await import("./auditoria.server");
-    await anotar(profile, {
-      accion: "exporto",
-      entidad: "proceso",
-      detalle: `Descargó la base completa: ${nombres.length} tablas, ${filasTotal} filas`,
-      etiqueta: "SQL",
-    });
-    return {
-      filename: `vincula-libre-datos-${hoyBogota()}.sql`,
-      base64: Buffer.from(cuerpo, "utf8").toString("base64"),
-    };
-  });
+END $$;
+COMMIT;
+`;
+  return resumen;
+}

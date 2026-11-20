@@ -88,9 +88,16 @@ export function EquipoVista({ edita }: { edita: boolean }) {
   async function guardarAccesoDe(slug: string, acceso: Acceso) {
     setError("");
     setAviso("");
+    const propio = {
+      secciones: [...acceso.secciones],
+      poderes: [...acceso.poderes],
+      area: acceso.area,
+    };
+    const persona = gente.find((item) => item.slug === slug);
     try {
-      await guardarAcceso({ data: { slug, acceso } });
-      setAviso("Acceso actualizado. La próxima vez que entre, ve solo esas secciones.");
+      await guardarAcceso({ data: { slug, acceso: propio } });
+      const nombre = persona?.name.split(" ")[0] || slug;
+      setAviso(`Quedó guardado solo el acceso de ${nombre}. El tuyo y el de los demás no cambian.`);
       await cargar();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No pude cambiar el acceso");
@@ -207,10 +214,10 @@ function PersonaCard({
   const [ver, setVer] = useState(false);
   const [guardandoClave, setGuardandoClave] = useState(false);
   const [copiado, setCopiado] = useState(false);
-  const [acceso, setAcceso] = useState<Acceso>(() => accesoDe(persona.role, persona.acceso));
+  const [acceso, setAcceso] = useState<Acceso>(() => clonarAcceso(accesoDe(persona.role, persona.acceso)));
   useEffect(() => {
-    setAcceso(accesoDe(persona.role, persona.acceso));
-  }, [persona.role, persona.acceso]);
+    setAcceso(clonarAcceso(accesoDe(persona.role, persona.acceso)));
+  }, [persona.role, persona.acceso, persona.slug]);
   return (
     <li className={"rounded-card border border-line bg-card p-4 " + (persona.activo ? "" : "opacity-70")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -260,10 +267,14 @@ function PersonaCard({
       ) : null}
       {edita ? (
         <div className="mt-3">
-          <SelectorAcceso value={acceso} onChange={setAcceso} bloqueado={persona.slug === "david"} />
-          <button type="button" onClick={() => onAcceso(acceso)} className="mt-2 h-10 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper">
-            Guardar acceso
-          </button>
+          <SelectorAcceso value={acceso} onChange={setAcceso} bloqueado={persona.slug === "david" || persona.role === "gerencia"} />
+          {persona.slug === "david" ? (
+            <p className="mt-2 text-xs text-ink-soft">El asesor líder entra a todo. Estas casillas no se pueden quitar y no cambian cuando editas a otra persona.</p>
+          ) : (
+            <button type="button" onClick={() => onAcceso(acceso)} className="mt-2 h-10 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper">
+              Guardar acceso de {persona.name.split(" ")[0]}
+            </button>
+          )}
         </div>
       ) : null}
       {horario ? (
@@ -368,24 +379,30 @@ const ROLES: { id: Role; label: string }[] = [
   { id: "servicio", label: "Servicio al cliente" },
 ];
 
+function clonarAcceso(acceso: Acceso): Acceso {
+  return { secciones: [...acceso.secciones], poderes: [...acceso.poderes], area: acceso.area };
+}
+
 function accesoPorRol(rol: Role, actual: Acceso): Acceso {
+  const base = clonarAcceso(actual);
   if (rol === "lider") return { secciones: SECCIONES_APP.map((item) => item.id), poderes: ["propios", "ver_equipo", "configurar"], area: "" };
   if (rol === "coordinadora") {
-    const secciones = [...new Set([...actual.secciones, "equipo", "auditoria"])];
+    const secciones = [...new Set([...base.secciones, "equipo", "auditoria"])];
     return { secciones, poderes: ["ver_equipo"], area: "" };
   }
   if (rol === "via_seguros" || rol === "operativa" || rol === "servicio") return { secciones: ["procesos"], poderes: [], area: rol };
-  const secciones = actual.secciones.filter((id) => id !== "equipo" && id !== "auditoria");
-  return { secciones: secciones.length > 0 ? secciones : accesoVacio().secciones, poderes: ["propios"], area: "" };
+  const secciones = base.secciones.filter((id) => id !== "equipo" && id !== "auditoria");
+  return { secciones: secciones.length > 0 ? secciones : [...accesoVacio().secciones], poderes: ["propios"], area: "" };
 }
 
 export function SelectorAcceso({ value, onChange, bloqueado }: { value: Acceso; onChange: (acceso: Acceso) => void; bloqueado?: boolean }) {
   function poner(next: Acceso) {
+    const copia = clonarAcceso(next);
     if (bloqueado) {
-      onChange({ ...next, poderes: ["propios", "ver_equipo", "configurar"], area: "" });
+      onChange({ ...copia, poderes: ["propios", "ver_equipo", "configurar"], area: "" });
       return;
     }
-    onChange(next);
+    onChange(copia);
   }
   function seccion(id: string, on: boolean) {
     const secciones = on ? [...new Set([...value.secciones, id])] : value.secciones.filter((item) => item !== id);
@@ -431,7 +448,7 @@ export function SelectorAcceso({ value, onChange, bloqueado }: { value: Acceso; 
         <div className="mt-2 grid gap-1 sm:grid-cols-2">
           {SECCIONES_APP.map((item) => (
             <label key={item.id} className="flex items-center gap-2 text-sm font-normal">
-              <input type="checkbox" checked={value.secciones.includes(item.id)} onChange={(e) => seccion(item.id, e.target.checked)} />
+              <input type="checkbox" checked={value.secciones.includes(item.id)} disabled={bloqueado} onChange={(e) => seccion(item.id, e.target.checked)} />
               {item.label}
             </label>
           ))}

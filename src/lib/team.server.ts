@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth/server";
 import { getSql } from "@/lib/db";
-import type { Role } from "@/lib/team.public";
+import { accesoDe, accesoJson, type Role } from "@/lib/team.public";
 
 const TEAM: { slug: string; name: string; email: string; password: string; role: Role }[] = [
   { slug: "david", name: "David Jaimes", email: "david@vinculalibre.app", password: "David2026", role: "lider" },
@@ -50,7 +50,18 @@ export async function profileFor(userId: string) {
   const rows = await sql<{ user_id: string; slug: string; name: string; role: Role; ciudad_id: number | null; ciudad_vista: number | null; acceso: string }>`
     select user_id, slug, name, role, ciudad_id, ciudad_vista, coalesce(acceso, '') as acceso from profiles where user_id = ${userId}
   `;
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  if (row.slug === "david" || row.role === "gerencia") {
+    const rol: Role = row.role === "gerencia" ? "gerencia" : "lider";
+    const completo = accesoJson(accesoDe(rol, ""));
+    if (row.role !== rol || (row.acceso ?? "") !== completo) {
+      await sql.query(`update profiles set role = $1, acceso = $2 where user_id = $3`, [rol, completo, row.user_id]);
+      row.role = rol;
+      row.acceso = completo;
+    }
+  }
+  return row;
 }
 
 export function emailForSlug(slug: string) {

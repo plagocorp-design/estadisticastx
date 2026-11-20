@@ -1716,7 +1716,18 @@ export const buscarCall = createServerFn({ method: "POST" })
         [ciudad, como],
       );
       if (ajena[0]) {
-        const dueno = await duenoDe(sql, Number(ajena[0].id));
+        const dueno = (await duenoDe(sql, Number(ajena[0].id))) || "otro asesor";
+        if (!veElEquipo(profile.role)) {
+          const { anotar } = await import("./auditoria.server");
+          await anotar(profile, {
+            accion: "consulta",
+            entidad: "lead",
+            entidadId: ajena[0].id,
+            etiqueta: ajena[0].placa,
+            detalle: "Consultó una placa de otro asesor. No se mostró nombre, cédula ni teléfono.",
+          });
+          return [{ id: 0, placa: ajena[0].placa, nombre: "", telefono: "", empresa: "", hecho: true, dueno }];
+        }
         return [{
           id: Number(ajena[0].id),
           placa: ajena[0].placa,
@@ -1724,7 +1735,7 @@ export const buscarCall = createServerFn({ method: "POST" })
           telefono: ajena[0].telefono,
           empresa: ajena[0].empresa,
           hecho: true,
-          dueno: dueno || "otro asesor",
+          dueno,
         }];
       }
     }

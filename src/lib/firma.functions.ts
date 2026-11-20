@@ -780,6 +780,6 @@ export const generarCartaDevolucion = createServerFn({ method: "POST" })
           ? await montarCartaDesvinculacion(datos)
           : await montarCartaDevolucion(datos);
     const filename =
-      data.destino === "aseguradora" ? `aseguradora-${placa}.pdf` : data.destino === "desvinculacion" ? `desvinculacion-${placa}.pdf` : `empresa-${placa}.pdf`;
+      data.destino === "aseguradora" ? `aseguradora-${placa}.pdf` : data.destino === "desvinculacion" ? `desvinculacion-${placa}.pdf` : `devolucion-prima-${placa}.pdf`;
     return { base64, filename };
   });

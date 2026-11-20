@@ -377,6 +377,8 @@ function carroceriaEn(crudo: string) {
 }
 
 function combustibleEn(crudo: string) {
+  const pegado = crudo.toUpperCase().replace(/[^A-Z]/g, "");
+  if (/GASGASOL|GASYGAS/.test(pegado)) return "GASOLINA Y GAS";
   const t = crudo.toUpperCase();
   if (/EL[EÉ]CTR/.test(t)) return "ELECTRICO";
   if (/H[IÍ]BRID/.test(t)) return "HIBRIDO";
@@ -385,6 +387,17 @@ function combustibleEn(crudo: string) {
   if (/GAS NATURAL|\bGNV\b/.test(t)) return "GAS NATURAL";
   if (/GASOLINA/.test(t)) return "GASOLINA";
   return "";
+}
+
+function cilindrajeDe(crudo: string) {
+  const compacto = crudo.replace(/\s/g, "");
+  const miles = compacto.match(/(\d)\.(\d{3})(?!\d)/);
+  if (miles) {
+    const n = Number(`${miles[1]}${miles[2]}`);
+    if (n >= 50 && n <= 8000) return String(n);
+  }
+  const n = compacto.replace(/\./g, "").match(/\d{3,4}/)?.[0] ?? "";
+  return n && Number(n) >= 50 && Number(n) <= 8000 ? n : "";
 }
 
 function servicioEn(crudo: string) {
@@ -563,7 +576,7 @@ function camposLicencia(texto: string) {
   const motor = motorValido(tomados.motor ?? "") || motorValido(codigo(lineaSiguiente(lineas, /motor\b/i)));
   const vin = vinEn(tomados.vin || tomados.chasis || texto);
   const serie = vin || motorValido(tomados.serie ?? "");
-  const cilindraje = (tomados.cilindraje ?? "").match(/\d{3,5}/)?.[0] ?? texto.match(/cilindrad[ao][^\d]{0,12}(\d{3,5})/i)?.[1] ?? "";
+  const cilindraje = cilindrajeDe(tomados.cilindraje ?? "") || cilindrajeDe(texto.match(/cilindrad[ao][^\d]{0,16}(\d(?:\.\d{3})|\d{3,4})/i)?.[1] ?? "");
   const clase = claseEn(tomados.clase ?? "");
   const carroceria = carroceriaEn(tomados.carroceria ?? "");
   const combustible = combustibleEn(tomados.combustible ?? "") || combustibleEn(texto);
@@ -723,7 +736,136 @@ export function analizarTexto(
   if (combustible) extra.combustible = combustible;
   if (licencia.chasis) extra.chasis = licencia.chasis;
   if (licencia.nit) extra.nitAnterior = licencia.nit;
+  Object.assign(extra, polizaEn(base));
   return { vigencia, vence: mostrar(vence), aviso, campos, datos, extra };
+}
+
+const ASEGURADORAS: [RegExp, string][] = [
+  [/MUNDIAL/, "COMPAÑIA MUNDIAL DE SEGUROS S.A."],
+  [/SURA/, "SEGUROS SURA"],
+  [/BOL[IÍ]VAR/, "SEGUROS BOLIVAR"],
+  [/ALLIANZ/, "ALLIANZ"],
+  [/AXA/, "AXA COLPATRIA"],
+  [/MAPFRE/, "MAPFRE"],
+  [/PREVISORA/, "PREVISORA"],
+  [/EQUIDAD/, "LA EQUIDAD"],
+  [/SOLIDARIA/, "SOLIDARIA"],
+  [/\bHDI\b/, "HDI SEGUROS"],
+  [/\bSBS\b/, "SBS SEGUROS"],
+  [/CHUBB/, "CHUBB"],
+  [/ESTADO/, "SEGUROS DEL ESTADO"],
+  [/LIBERTY/, "LIBERTY"],
+];
+
+function isoFecha(valor: string) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(valor.trim());
+  if (!m) return "";
+  const fecha = iso(Number(m[3]), Number(m[2]), Number(m[1]));
+  return fecha;
+}
+
+export function polizaEn(texto: string) {
+  const extra: Record<string, string> = {};
+  if (!/p[oó]liza|prima|RCC|RCE|asegurador/i.test(texto)) return extra;
+  const planoTexto = texto.toUpperCase();
+  for (const [regla, nombre] of ASEGURADORAS) {
+    if (regla.test(planoTexto)) {
+      extra.aseguradora = nombre;
+      break;
+    }
+  }
+  const numero = texto.match(/p[oó]liza(?:\s+n[oº°.]?(?:\s*ro)?)?[^\d]{0,16}(\d{5,12})/i);
+  if (numero) extra.numeroPoliza = numero[1];
+  const fechas = fechasDe(texto).map((fecha) => fecha.iso).sort();
+  if (fechas.length >= 2) {
+    extra.inicioPoliza = fechas[0];
+    extra.vencePoliza = fechas[fechas.length - 1];
+  }
+  const valor = texto.match(/(?:prima|valor|total)[^\d]{0,24}(\d{1,3}(?:\.\d{3})+|\d{5,9})/i);
+  if (valor) {
+    const n = valor[1].replace(/\./g, "");
+    if (Number(n) >= 10000 && Number(n) <= 20000000) extra.valorPoliza = n;
+  }
+  return extra;
+}
+
+function nitNueve(crudo: string) {
+  const n = crudo.replace(/\D/g, "");
+  if (n.length === 9) return n;
+  if (n.length === 10) return n.slice(0, 9);
+  return "";
+}
+
+export function fundirIA(base: LecturaDoc, crudo: Record<string, string>): LecturaDoc {
+  const texto = (valor: unknown) => String(valor ?? "").replace(/\s+/g, " ").trim();
+  const datos: Partial<Record<CampoLeido["key"], string>> = { ...(base.datos ?? {}) };
+  const extra: Record<string, string> = { ...(base.extra ?? {}) };
+  const puestos: string[] = [];
+  function poner(key: CampoLeido["key"], valor: string) {
+    if (!valor || datos[key]) return;
+    datos[key] = valor;
+    puestos.push(ETIQUETAS[key]);
+  }
+  const placa = texto(crudo.placa).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (/^[A-Z]{3}\d{3}$|^[A-Z]{3}\d{2}[A-Z]$/.test(placa)) poner("placa", placa);
+  const cc = numeroCc(texto(crudo.cc));
+  if (cc) poner("cc", cc);
+  const nombre = usable(texto(crudo.nombre).toUpperCase(), 8);
+  if (nombre) poner("nombre", nombre);
+  const telefono = texto(crudo.telefono).replace(/\D/g, "");
+  if (/^3\d{9}$/.test(telefono)) poner("telefono", telefono);
+  const direccion = usable(texto(crudo.direccion), 14);
+  if (direccion) poner("direccion", direccion);
+  const correo = texto(crudo.correo).toLowerCase();
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) poner("correo", correo);
+  const marca = marcaEn(texto(crudo.marca), texto(crudo.marca));
+  if ((MARCAS as readonly string[]).includes(marca)) poner("marca", marca);
+  const linea = lineaEn(texto(crudo.linea), marca || datos.marca || "");
+  if (linea) poner("linea", linea);
+  const modelo = texto(crudo.modelo).match(/\b(19|20)\d{2}\b/)?.[0] ?? "";
+  if (modelo) poner("modelo", modelo);
+  const empresa = acercarEmpresa(texto(crudo.empresa));
+  if (empresa) poner("empresa", empresa);
+  const capacidad = texto(crudo.capacidad).match(/\d{1,2}/)?.[0] ?? "";
+  if (capacidad && Number(capacidad) >= 1 && Number(capacidad) <= 15) poner("capacidad", capacidad);
+  const clase = claseEn(texto(crudo.clase));
+  if (clase) poner("clase", clase);
+  const carroceria = carroceriaEn(texto(crudo.carroceria));
+  if (carroceria) poner("carroceria", carroceria);
+  const motor = motorValido(texto(crudo.motor));
+  if (motor) poner("motor", motor);
+  const serie = vinEn(texto(crudo.serie) || texto(crudo.chasis)) || motorValido(texto(crudo.serie));
+  if (serie) poner("serie", serie);
+  const cilindraje = cilindrajeDe(texto(crudo.cilindraje));
+  if (cilindraje) poner("cilindraje", cilindraje);
+  const servicio = servicioEn(texto(crudo.servicio));
+  if (servicio) poner("servicio", servicio);
+  const combustible = combustibleEn(texto(crudo.combustible));
+  if (combustible && !extra.combustible) extra.combustible = combustible;
+  const chasis = vinEn(texto(crudo.chasis) || texto(crudo.serie));
+  if (chasis && !extra.chasis) extra.chasis = chasis;
+  const nit = nitNueve(texto(crudo.nit));
+  if (nit && !extra.nitAnterior) extra.nitAnterior = nit;
+  const aseguradora = texto(crudo.aseguradora).toUpperCase();
+  if (aseguradora.length >= 3 && aseguradora.length <= 80 && !extra.aseguradora) extra.aseguradora = aseguradora;
+  const numeroPoliza = texto(crudo.poliza || crudo.numeroPoliza).replace(/\D/g, "");
+  if (numeroPoliza.length >= 5 && numeroPoliza.length <= 12 && !extra.numeroPoliza) extra.numeroPoliza = numeroPoliza;
+  const inicioPoliza = isoFecha(texto(crudo.inicioPoliza));
+  if (inicioPoliza && !extra.inicioPoliza) extra.inicioPoliza = inicioPoliza;
+  const vencePoliza = isoFecha(texto(crudo.vencePoliza));
+  if (vencePoliza && !extra.vencePoliza) extra.vencePoliza = vencePoliza;
+  const valorPoliza = texto(crudo.valorPoliza).replace(/\D/g, "");
+  if (valorPoliza && Number(valorPoliza) >= 10000 && Number(valorPoliza) <= 20000000 && !extra.valorPoliza) extra.valorPoliza = valorPoliza;
+  const alerta = texto(crudo.alerta);
+  let aviso = base.aviso;
+  if (alerta && !/^(ninguna|no|ok|sin alerta|n\/a)$/i.test(alerta)) aviso = `${alerta} ${aviso}`.trim();
+  if (puestos.length && /no alcanc[eé] a leer|no encontr[eé]|Lo le[ií]/i.test(base.aviso)) {
+    aviso = `Leí ${puestos.join(", ")}.${alerta && !/^(ninguna|no|ok|sin alerta|n\/a)$/i.test(alerta) ? ` ${alerta}` : ""}`.trim();
+  }
+  const campos = (Object.keys(ETIQUETAS) as CampoLeido["key"][])
+    .filter((key) => datos[key])
+    .map((key) => ({ key, label: ETIQUETAS[key], actual: "", leido: datos[key] ?? "" }));
+  return { ...base, aviso, datos, extra, campos };
 }
 
 export const LADOS = [

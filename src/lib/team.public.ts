@@ -102,7 +102,7 @@ export function accesoDe(role: string, raw?: string | null): Acceso {
       const secciones = Array.isArray(parsed.secciones) ? parsed.secciones.filter((id) => IDS_SECCION.has(id)) : [];
       const poderes = Array.isArray(parsed.poderes) ? parsed.poderes.filter((id) => IDS_PODER.has(id)) : [];
       const area = AREAS_APP.some((item) => item.id === parsed.area) ? String(parsed.area) : "";
-      if (secciones.length > 0) return conFormato(role, { secciones, poderes, area });
+      if (secciones.length > 0 && role !== "lider" && role !== "gerencia") return conFormato(role, { secciones, poderes, area });
     } catch {
       /* el texto viejo no cuenta */
     }
@@ -126,11 +126,20 @@ export function rolDeAcceso(acceso: Acceso): Role {
   return "asesor";
 }
 
+function copiar(acceso: Acceso): Acceso {
+  return {
+    secciones: [...acceso.secciones],
+    poderes: [...acceso.poderes],
+    area: acceso.area,
+  };
+}
+
 function conFormato(role: string, acceso: Acceso): Acceso {
-  if ((role === "lider" || role === "coordinadora") && !acceso.secciones.includes("formato")) {
-    return { ...acceso, secciones: [...acceso.secciones, "formato"] };
+  const copia = copiar(acceso);
+  if ((role === "lider" || role === "coordinadora") && !copia.secciones.includes("formato")) {
+    copia.secciones.push("formato");
   }
-  return acceso;
+  return copia;
 }
 
 export function accesoJson(acceso: Acceso) {

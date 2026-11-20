@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PilotoRouteImport } from './routes/piloto'
+import { Route as ApiRespaldoRouteImport } from './routes/api/respaldo'
 import { Route as ApiSheetsRouteImport } from './routes/api/sheets'
 import { Route as ApiWaRouteImport } from './routes/api/wa'
 import { Route as FirmarTokenRouteImport } from './routes/firmar.$token'
@@ -31,6 +32,11 @@ const LoginRoute = LoginRouteImport.update({
 const PilotoRoute = PilotoRouteImport.update({
   id: '/piloto',
   path: '/piloto',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRespaldoRoute = ApiRespaldoRouteImport.update({
+  id: '/api/respaldo',
+  path: '/api/respaldo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSheetsRoute = ApiSheetsRouteImport.update({
@@ -63,6 +69,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/piloto': typeof PilotoRoute
+  '/api/respaldo': typeof ApiRespaldoRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
@@ -73,6 +80,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/piloto': typeof PilotoRoute
+  '/api/respaldo': typeof ApiRespaldoRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
@@ -84,6 +92,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/piloto': typeof PilotoRoute
+  '/api/respaldo': typeof ApiRespaldoRoute
   '/api/sheets': typeof ApiSheetsRoute
   '/api/wa': typeof ApiWaRoute
   '/firmar/$token': typeof FirmarTokenRoute
@@ -96,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/piloto'
+    | '/api/respaldo'
     | '/api/sheets'
     | '/api/wa'
     | '/firmar/$token'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/piloto'
+    | '/api/respaldo'
     | '/api/sheets'
     | '/api/wa'
     | '/firmar/$token'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/piloto'
+    | '/api/respaldo'
     | '/api/sheets'
     | '/api/wa'
     | '/firmar/$token'
@@ -127,6 +139,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   PilotoRoute: typeof PilotoRoute
+  ApiRespaldoRoute: typeof ApiRespaldoRoute
   ApiSheetsRoute: typeof ApiSheetsRoute
   ApiWaRoute: typeof ApiWaRoute
   FirmarTokenRoute: typeof FirmarTokenRoute
@@ -155,6 +168,13 @@ declare module '@tanstack/react-router' {
       path: '/piloto'
       fullPath: '/piloto'
       preLoaderRoute: typeof PilotoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/respaldo': {
+      id: '/api/respaldo'
+      path: '/api/respaldo'
+      fullPath: '/api/respaldo'
+      preLoaderRoute: typeof ApiRespaldoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sheets': {
@@ -199,6 +219,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   PilotoRoute: PilotoRoute,
+  ApiRespaldoRoute: ApiRespaldoRoute,
   ApiSheetsRoute: ApiSheetsRoute,
   ApiWaRoute: ApiWaRoute,
   FirmarTokenRoute: FirmarTokenRoute,

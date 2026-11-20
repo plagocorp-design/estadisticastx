@@ -305,7 +305,10 @@ function Llamar({ me, puedeTipificar, verEquipo, asesores, onProceso, onError, o
                 }
                 void abrir(item.id);
               }}>
-                <span><b>{item.placa || "Sin placa"}</b> · {item.nombre || "Sin nombre"} · {item.telefono}</span>
+                <span>
+                  <b>{item.placa || "Sin placa"}</b>
+                  {item.dueno ? "" : ` · ${item.nombre || "Sin nombre"} · ${item.telefono}`}
+                </span>
                 <span className="text-ink-soft">{item.dueno ? `La tiene ${item.dueno}` : item.hecho ? "Ya llamado" : "Pendiente"}</span>
               </button>
             </li>

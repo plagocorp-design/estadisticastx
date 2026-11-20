@@ -33,7 +33,6 @@ import { bitacoraHecha, horaBogota, type Bitacora } from "@/lib/bitacora";
 import { SheetsPanel, DOCUMENTO } from "@/components/sheets-panel";
 import { traerSheetsFn } from "@/lib/sheets.functions";
 import { marcarChatsLeidos, resumenChat, type ChatResumen } from "@/lib/chat.functions";
-import { exportarSql } from "@/lib/respaldo.functions";
 import {
   createCaso,
   exportarExcel,
@@ -380,8 +379,37 @@ export function Board() {
     return bajarArchivo(exportarTodo);
   }
 
-  function bajarSql() {
-    return bajarArchivo(exportarSql);
+  async function bajarSql() {
+    setExportando(true);
+    setError("");
+    try {
+      const { getBearerToken } = await import("@/lib/auth/client");
+      const token = getBearerToken();
+      const res = await fetch("/api/respaldo", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error((await res.text()) || "No pude armar el backup");
+      const blob = await res.blob();
+      const cola = await blob.slice(-180).text();
+      if (!cola.includes("-- FIN")) {
+        const corte = cola.match(/-- CORTE ([^\n]+)/);
+        throw new Error(corte?.[1] || "El backup quedó cortado. No lo uses.");
+      }
+      const archivo = res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] || "vincula-libre-todo.sql";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = archivo;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(fallo(err));
+    } finally {
+      setExportando(false);
+    }
   }
 
   async function cargarTodo(file: File) {
@@ -574,7 +602,7 @@ export function Board() {
                 className="flex h-11 items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper disabled:opacity-60"
               >
                 <Download className="size-4" />
-                {exportando ? "Armando…" : "Base completa"}
+                {exportando ? "Armando…" : "Backup de todo"}
               </button>
               <label className="flex h-11 cursor-pointer items-center gap-2 rounded-xl px-3 pl-9 text-sm text-paper">
                 <Upload className="size-4" />
@@ -746,7 +774,7 @@ export function Board() {
                   className="inline-flex h-10 items-center gap-1 rounded-xl border border-line px-3 text-sm disabled:opacity-60"
                 >
                   <Download className="size-4" />
-                  {exportando ? "Armando…" : "Base completa"}
+                  {exportando ? "Armando…" : "Backup de todo"}
                 </button>
                 <label className="inline-flex h-10 cursor-pointer items-center gap-1 rounded-xl border border-line px-3 text-sm">
                   <Upload className="size-4" />
@@ -2581,6 +2609,7 @@ function Panel({
                 ) : null}
                 {pestana === "inicio" ? (
                   <>
+                <CartaDelProceso form={form} onChange={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} />
                 <label className="text-sm font-medium">
                   Observación
                   <textarea
@@ -2650,16 +2679,7 @@ function Panel({
                 </p>
               ) : null}
               {pestana === "poliza" ? (
-                <CartaDevolucion
-                  empresa={form.empresa}
-                  propietario={form.nombre}
-                  cc={form.cc}
-                  telefono={form.telefono}
-                  correo={form.correo}
-                  placa={form.placa}
-                  marca={form.marca}
-                  modelo={form.modelo}
-                />
+                <CartaDelProceso form={form} onChange={(patch) => setForm((actual) => (actual ? { ...actual, ...patch } : actual))} />
               ) : null}
               {pestana === "tarjeta" ? (
                 <div className="grid gap-3">
@@ -2888,6 +2908,54 @@ function Panel({
         </div>
       </div>
     </div>
+  );
+}
+
+function CartaDelProceso({ form, onChange }: { form: Caso; onChange: (patch: Partial<Caso>) => void }) {
+  let extra: Record<string, string> = {};
+  try {
+    const leido = JSON.parse(form.datosExtra || "{}") as Record<string, string>;
+    if (leido && typeof leido === "object") extra = leido;
+  } catch {
+    extra = {};
+  }
+  return (
+    <CartaDevolucion
+      casoId={form.id}
+      empresa={form.empresa}
+      nit={extra.nitAnterior || nitDe(form.empresa)}
+      propietario={form.nombre}
+      cc={form.cc}
+      telefono={form.telefono}
+      correo={form.correo}
+      placa={form.placa}
+      marca={form.marca}
+      modelo={form.modelo}
+      aseguradoraInicial={extra.aseguradora || ""}
+      polizaInicial={extra.numeroPoliza || ""}
+      inicioInicial={extra.inicioPoliza || ""}
+      venceInicial={extra.vencePoliza || ""}
+      valorInicial={extra.valorPoliza || ""}
+      onDatos={(patch) => {
+        let mapa: Record<string, string> = {};
+        try {
+          const leido = JSON.parse(form.datosExtra || "{}") as Record<string, string>;
+          if (leido && typeof leido === "object") mapa = leido;
+        } catch {
+          mapa = {};
+        }
+        const empresa = patch.empresa?.trim() ? patch.empresa : form.empresa;
+        const junto = { ...mapa, ...(patch.extra ?? {}) };
+        if (empresa !== form.empresa) {
+          try {
+            Object.assign(junto, JSON.parse(conNit(JSON.stringify(junto), empresa)) as Record<string, string>);
+          } catch {
+            junto.nitAnterior = nitDe(empresa);
+          }
+        }
+        onChange({ empresa, datosExtra: JSON.stringify(junto) });
+      }}
+    />
   );
 }
 

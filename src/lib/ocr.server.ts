@@ -1,4 +1,4 @@
-import { analizarTexto, asignarLados, type LecturaDoc } from "@/lib/ocr";
+import { analizarTexto, asignarLados, fundirIA, type LecturaDoc } from "@/lib/ocr";
 
 function bytesDe(base64: string) {
   const limpio = base64.replace(/^data:[^;]+;base64,/i, "").replace(/\s/g, "");
@@ -106,7 +106,96 @@ export async function leerArchivo(nombre: string, archivo: string, tipo: string,
   } catch {
     texto = "";
   }
-  return analizarTexto(tipo, texto, actual);
+  return conVision(data, esPdf, analizarTexto(tipo, texto, actual));
+}
+
+const PEDIDO_IA = `Lee esta foto de un trámite de taxi en Colombia. Puede ser cédula, licencia de tránsito, tarjeta de operación, extracto o póliza RCC/RCE.
+Responde solo JSON con estas claves, en blanco si no se ve: placa, cc, nombre, telefono, direccion, correo, marca, linea, modelo, empresa, capacidad, clase, carroceria, motor, serie, chasis, cilindraje, servicio, combustible, nit, aseguradora, poliza, inicioPoliza, vencePoliza, valorPoliza, alerta.
+Reglas: motor, serie, chasis, línea, cilindraje y clase salen de la licencia de tránsito, nunca de la tarjeta de operación. La empresa sale de la razón social de la tarjeta de operación. Nombre y cédula salen de la cédula. Cilindraje sin puntos. NIT solo dígitos. Fechas de la póliza en YYYY-MM-DD. No inventes. Si la cédula y la licencia no coinciden, dilo en alerta.`;
+
+function jsonDe(texto: string) {
+  const limpio = texto.trim().replace(/^```json\s*/i, "").replace(/```$/i, "");
+  const inicio = limpio.indexOf("{");
+  const fin = limpio.lastIndexOf("}");
+  if (inicio < 0 || fin <= inicio) return null;
+  try {
+    const valor = JSON.parse(limpio.slice(inicio, fin + 1)) as unknown;
+    if (!valor || typeof valor !== "object" || Array.isArray(valor)) return null;
+    const salida: Record<string, string> = {};
+    for (const [clave, item] of Object.entries(valor)) salida[clave] = String(item ?? "");
+    return salida;
+  } catch {
+    return null;
+  }
+}
+
+function textoRespuesta(cuerpo: unknown) {
+  if (!cuerpo || typeof cuerpo !== "object") return "";
+  const obj = cuerpo as { output_text?: string; output?: { content?: { text?: string }[] }[]; choices?: { message?: { content?: string } }[] };
+  if (typeof obj.output_text === "string" && obj.output_text.trim()) return obj.output_text;
+  const partes: string[] = [];
+  for (const item of obj.output ?? []) {
+    for (const bloque of item.content ?? []) if (bloque.text) partes.push(bloque.text);
+  }
+  if (partes.length) return partes.join("\n");
+  return obj.choices?.[0]?.message?.content ?? "";
+}
+
+let iaFuera = false;
+
+async function leerConIA(imagen: Buffer) {
+  const apiKey = process.env.XAI_API_KEY;
+  if (iaFuera || !apiKey) return null;
+  let jpeg = imagen;
+  try {
+    const cargado = await import("sharp");
+    const sharp = typeof cargado.default === "function" ? cargado.default : (cargado as unknown as typeof cargado.default);
+    jpeg = await sharp(imagen, { failOn: "none" }).rotate().resize({ width: 1400, height: 1400, fit: "inside" }).jpeg({ quality: 68 }).toBuffer();
+  } catch {
+    return null;
+  }
+  if (jpeg.length < 800 || jpeg.length > 1_600_000) return null;
+  const respuesta = await fetch("https://api.x.ai/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(22000),
+    body: JSON.stringify({
+      model: "grok-4.5",
+      temperature: 0,
+      max_output_tokens: 700,
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: PEDIDO_IA },
+            { type: "input_image", image_url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+          ],
+        },
+      ],
+    }),
+  });
+  if (respuesta.status === 401 || respuesta.status === 402 || respuesta.status === 403) iaFuera = true;
+  if (!respuesta.ok) return null;
+  return jsonDe(textoRespuesta(await respuesta.json()));
+}
+
+async function conVision(data: Buffer, esPdf: boolean, lectura: LecturaDoc) {
+  const utiles = Object.values(lectura.datos ?? {}).filter((valor) => String(valor ?? "").trim()).length;
+  const poliza = Boolean(lectura.extra?.numeroPoliza || lectura.extra?.aseguradora);
+  if (utiles >= 3 || poliza) return lectura;
+  let imagen = data;
+  if (esPdf) {
+    const fotos = fotosDePdf(data);
+    if (!fotos[0]) return lectura;
+    imagen = fotos[0];
+  }
+  try {
+    const crudo = await leerConIA(imagen);
+    if (!crudo) return lectura;
+    return fundirIA(lectura, crudo);
+  } catch {
+    return lectura;
+  }
 }
 
 export async function leerVarias(
