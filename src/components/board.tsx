@@ -18,7 +18,7 @@ import { cuando } from "@/lib/auditoria";
 import { certificadoProceso } from "@/lib/certificado.functions";
 import { EnviarFirma } from "@/components/enviar-firma";
 import { sincronizarDocuseal, verAuditoriaFirma } from "@/lib/firma.functions";
-import { leerDocumento, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
+import { leerDocumento, listarDocumentos, recibirTrozo, subirDocumento } from "@/lib/piloto.functions";
 import { paginasDe } from "@/lib/paginas";
 import { nitDe, conNit } from "@/lib/nits";
 import { CARROCERIAS, CLASES, COMBUSTIBLES, LINEAS, MARCAS, SERVICIOS } from "@/lib/vehiculos";
@@ -77,7 +77,7 @@ import { DATOS_CONTRATO } from "@/lib/gerencia";
 import { CartaDevolucion } from "@/components/carta-devolucion";
 import { AvisoTarjeta, avisoSugerido } from "@/components/aviso-tarjeta";
 import { estadoPiloto, pasarMano } from "@/lib/piloto.functions";
-import { etiquetaMarca, marcasDe } from "@/lib/piloto";
+import { copiasAlImprimir, etiquetaMarca, marcasDe, tipoVisible } from "@/lib/piloto";
 import { buscarEmpresas, unificarEmpresa } from "@/lib/empresas";
 import { aplicarIntranet, consultarTarjeta, type EstadoTarjetaOficial } from "@/lib/tarjeta.functions";
 
@@ -1597,6 +1597,12 @@ function Panel({
   const [leyendoFoto, setLeyendoFoto] = useState("");
   const [editorFotos, setEditorFotos] = useState(false);
   const [hojasArmadas, setHojasArmadas] = useState<{ nombre: string; archivo: string }[]>([]);
+  // Con qué fotos se armaron las hojas. Si después cambian las fotos, las hojas ya no sirven.
+  const [firmaHojas, setFirmaHojas] = useState("");
+  const [conFotos, setConFotos] = useState(false);
+  const [copiasCfg, setCopiasCfg] = useState<Record<string, number>>({});
+  const firmaFotos = fotosApertura.map((foto) => `${foto.tipo}:${foto.archivo.length}:${foto.archivo.slice(-24)}`).join("|");
+  const hojasAlDia = hojasArmadas.length > 0 && firmaHojas === firmaFotos;
   const [colaRecorte, setColaRecorte] = useState<File[]>([]);
   const loteRecorteRef = useRef<File[]>([]);
   const preferidoRecorteRef = useRef<FotoApertura["tipo"] | "">("");
@@ -1632,6 +1638,7 @@ function Panel({
         for (const paso of conf.pasos) mapa[paso.key] = { label: paso.label, activo: paso.activo };
         setPasosCfg(mapa);
         setDocsCfg(conf.documentos.map((doc) => ({ id: doc.id, label: doc.label, activo: doc.activo, parte: doc.parte })));
+        setCopiasCfg(Object.fromEntries(conf.documentos.filter((doc) => doc.copias > 0).map((doc) => [doc.id, doc.copias])));
         const guardados = new Map(conf.contratoCampos.map((campo) => [campo.campo, campo]));
         const base = DATOS_CONTRATO.map((dato) => {
           const guardado = guardados.get(dato.campo);
@@ -1888,8 +1895,13 @@ function Panel({
           data: { casoId: id, tipo: foto.tipo, nombre: foto.nombre, archivo: foto.archivo, lectura: foto.lectura },
         });
       }
-      for (const hoja of hojasArmadas) {
-        await guardarComoDocumento(id, "unificado", hoja.nombre, hoja.archivo, "");
+      if (hojasAlDia) {
+        // Las hojas llevan adentro las fotos que se acaban de subir: así el paquete no las repite.
+        const fuentes = (await listarDocumentos({ data: id })).filter((doc) => !doc.armado).map((doc) => doc.id);
+        const lectura = JSON.stringify({ armado: true, fuentes });
+        for (const hoja of hojasArmadas) {
+          await guardarComoDocumento(id, "unificado", hoja.nombre, hoja.archivo, lectura);
+        }
       }
       if (draft.contratoPdf && draft.contratoPdf.length > 80) {
         await guardarComoDocumento(id, "contrato", draft.contratoNombre || "contrato.pdf", draft.contratoPdf, "");
@@ -2281,7 +2293,7 @@ function Panel({
                 {caso?.actualizadoEn ? ` · Actualizado ${cuando(caso.actualizadoEn)}${caso.actualizadoPor ? ` por ${caso.actualizadoPor}` : ""}` : ""}
               </p>
             ) : (
-              <p className="text-sm text-ink-soft">Toma o sube la foto de la cédula y de la tarjeta de propiedad. También sirve un PDF de varias páginas: separa el frente y el reverso. El celular lo escribes tú.</p>
+              <p className="text-sm text-ink-soft">Escribe los datos a mano o ábrelo con las fotos de la cédula y la tarjeta de propiedad. Tú eliges.</p>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -2306,7 +2318,23 @@ function Panel({
             <>
             <form id="nuevo" onSubmit={create} className="grid gap-3">
               <div className="grid gap-2 rounded-2xl border border-line bg-paper p-3">
-                <p className="text-sm font-semibold">Abre el proceso con las fotos</p>
+                {!conFotos && fotosApertura.length === 0 ? (
+                  <>
+                    <p className="text-sm text-ink-soft">Puedes escribir los datos a mano aquí abajo, o abrir el proceso con las fotos de los documentos.</p>
+                    <button type="button" onClick={() => setConFotos(true)} className="h-11 rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">
+                      Abrir el proceso con fotos
+                    </button>
+                  </>
+                ) : (
+                <>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Abre el proceso con las fotos</p>
+                  {fotosApertura.length === 0 ? (
+                    <button type="button" onClick={() => setConFotos(false)} className="h-9 rounded-xl border border-line px-3 text-sm font-semibold">
+                      Mejor a mano
+                    </button>
+                  ) : null}
+                </div>
                 <p className="text-sm text-ink-soft">Cédula por las dos caras, tarjeta de propiedad por las dos caras y tarjeta de operación. Si es foto, primero la recortas. Un PDF de varias páginas se separa solo. El celular no sale en el documento: escríbelo tú.</p>
                 <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-2xl bg-navy px-3 text-sm font-semibold text-paper">
                   {leyendoFoto === "lote" ? "Leyendo…" : "Subir PDF o varias fotos"}
@@ -2330,8 +2358,14 @@ function Panel({
                 <FotoApertura etiqueta="Tarjeta de operación" src={srcFoto("tarjeta_operacion")} lista={fotosApertura.some((foto) => foto.tipo === "tarjeta_operacion")} leyendo={leyendoFoto === "tarjeta_operacion" || leyendoFoto === "lote"} onFile={(file) => empezarRecorte("tarjeta_operacion", [file])} />
                 {aviso ? <p className="text-sm text-ink-soft">{aviso}</p> : null}
                 <button type="button" disabled={fotosApertura.length === 0} onClick={() => setEditorFotos(true)} className="h-11 rounded-2xl border border-line bg-card px-3 text-sm font-semibold disabled:opacity-50">
-                  {hojasArmadas.length ? `Hojas armadas: ${hojasArmadas.length}. Acomodar otra vez` : "Acomodar estas fotos en hojas"}
+                  {hojasAlDia
+                    ? "Hojas armadas. Acomodar otra vez"
+                    : hojasArmadas.length
+                      ? "Cambiaste las fotos. Vuelve a acomodarlas en hojas"
+                      : "Acomodar estas fotos en hojas"}
                 </button>
+                </>
+                )}
               </div>
               {choques.map((campo) => (
                 <div key={campo.key} className="grid gap-1 rounded-2xl border border-line p-3 text-sm">
@@ -2406,10 +2440,12 @@ function Panel({
             </form>
             {editorFotos ? (
               <EditorHojas
-                fotos={fotosApertura.map((foto) => ({ id: foto.tipo, nombre: foto.nombre, src: `data:image/jpeg;base64,${foto.archivo}` }))}
+                fotos={fotosApertura.map((foto) => ({ id: foto.tipo, nombre: ETIQUETA_APERTURA[foto.tipo], src: `data:image/jpeg;base64,${foto.archivo}`, tipo: foto.tipo }))}
+                copiasDe={(tipoDoc) => copiasCfg[tipoDoc] ?? copiasCfg[tipoVisible(tipoDoc)] ?? copiasAlImprimir(tipoDoc)}
                 onCerrar={() => setEditorFotos(false)}
                 onGuardar={(hojas) => {
                   setHojasArmadas(hojas);
+                  setFirmaHojas(firmaFotos);
                   setEditorFotos(false);
                   setAviso(hojas.length === 1 ? "Armé 1 hoja. Se guarda al crear el proceso." : `Armé ${hojas.length} hojas. Se guardan al crear el proceso.`);
                 }}
@@ -3237,6 +3273,14 @@ function FotoApertura({
 }
 
 type FotoApertura = { tipo: "cedula_frente" | "cedula_reverso" | "tarjeta_propiedad_frente" | "tarjeta_propiedad_reverso" | "tarjeta_operacion"; nombre: string; archivo: string; lectura: string };
+
+const ETIQUETA_APERTURA: Record<FotoApertura["tipo"], string> = {
+  cedula_frente: "Cédula, frente",
+  cedula_reverso: "Cédula, reverso",
+  tarjeta_propiedad_frente: "Tarjeta de propiedad, frente",
+  tarjeta_propiedad_reverso: "Tarjeta de propiedad, reverso",
+  tarjeta_operacion: "Tarjeta de operación",
+};
 
 const NOMBRE_LADO: Record<FotoApertura["tipo"], string> = {
   cedula_frente: "cédula de frente",

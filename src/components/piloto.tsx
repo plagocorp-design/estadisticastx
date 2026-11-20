@@ -6,6 +6,8 @@ import {
   MARCAS_OP,
   MARCAS_SERVICIO,
   MARCAS_VIA,
+  copiasAlImprimir,
+  tipoVisible,
   etiquetaDoc,
   etiquetaMano,
   etiquetaMarca,
@@ -45,7 +47,7 @@ import {
 import { configura, esBandeja, etiquetaRol, llevaProcesos, type Role } from "@/lib/team.public";
 import { enviarEnTrozos, prepararArchivo, prepararParaLeer, traerPorTrozos, TOPE_ENVIO } from "@/lib/archivo";
 import { paginasDe } from "@/lib/paginas";
-import { EditorHojas } from "@/components/editor-hojas";
+import { EditorHojas, type FotoHoja } from "@/components/editor-hojas";
 import { RecortarFoto, esFotoParaRecortar } from "@/components/recortar-foto";
 
 function fallo(err: unknown) {
@@ -342,7 +344,15 @@ export function BloquePiloto({
   const [ocupado, setOcupado] = useState(false);
   const [vista, setVista] = useState<{ id: number; nombre: string; archivo: string } | null>(null);
   const [lectura, setLectura] = useState<LecturaDoc | null>(null);
-  const [editor, setEditor] = useState<{ id: string; nombre: string; src: string }[] | null>(null);
+  const [editor, setEditor] = useState<{ fotos: FotoHoja[]; fuentes: number[]; viejas: number[] } | null>(null);
+  const [paquete, setPaqueteCrudo] = useState<{ nombre: string; archivo: string; url: string; contenido: { nombre: string; copias: number; hojas: number }[] } | null>(null);
+  const setPaquete = (nuevo: typeof paquete) => {
+    setPaqueteCrudo((viejo) => {
+      if (viejo?.url) URL.revokeObjectURL(viejo.url);
+      return nuevo;
+    });
+  };
+  const [copias, setCopias] = useState<Record<string, number>>({});
   const [colaFoto, setColaFoto] = useState<{ id: string; file: File; reemplazaId?: number; tipoDoc?: string }[]>([]);
   const [etiquetas, setEtiquetas] = useState<Record<string, string>>({});
   const [pasosOn, setPasosOn] = useState<Record<string, boolean>>({});
@@ -381,7 +391,12 @@ export function BloquePiloto({
       .then((conf) => {
         const mapa: Record<string, string> = {};
         const pasos: Record<string, boolean> = {};
-        for (const doc of conf.documentos) if (doc.activo) mapa[doc.id] = doc.label;
+        const veces: Record<string, number> = {};
+        for (const doc of conf.documentos) {
+          if (doc.activo) mapa[doc.id] = doc.label;
+          if (doc.copias > 0) veces[doc.id] = doc.copias;
+        }
+        setCopias(veces);
         for (const paso of conf.pasos) pasos[paso.key] = paso.activo;
         setEtiquetas(mapa);
         setPasosOn(pasos);
@@ -718,13 +733,19 @@ export function BloquePiloto({
                   const archivo = file.archivo || (file.cargaId
                     ? await traerPorTrozos(file.total, async (desde) => (await parteCarga({ data: { cargaId: file.cargaId, desde } })).datos)
                     : "");
-                  bajar(file.nombre, archivo);
+                  const url = URL.createObjectURL(new Blob([bytesDe(archivo)], { type: "application/pdf" }));
+                  setPaquete({ nombre: file.nombre, archivo, url, contenido: file.contenido ?? [] });
                 })
               }
               className="h-10 w-fit rounded-2xl border border-line bg-card px-3 text-sm font-semibold disabled:opacity-60"
             >
-              Bajar paquete para imprimir
+              {ocupado ? "Armando…" : "Ver y bajar paquete para imprimir"}
             </button>
+          ) : null}
+          {docs.some((doc) => doc.armado && doc.viejo) ? (
+            <p className="rounded-2xl border border-danger px-3 py-2 text-sm text-danger">
+              Las hojas armadas quedaron viejas: borraron o cambiaron un documento que estaba adentro. No salen en el paquete hasta que las vuelvas a acomodar.
+            </p>
           ) : null}
           {sube ? (
             <div className="grid gap-2">
@@ -771,8 +792,12 @@ export function BloquePiloto({
                 disabled={ocupado}
                 onClick={() =>
                   void correr(async () => {
-                    const cargadas: { id: string; nombre: string; src: string }[] = [];
-                    for (const doc of docs) {
+                    // Siempre se arma con lo que hay hoy: sin las hojas armadas de antes (si no, salen repetidas)
+                    // y sin lo que operativa no ve.
+                    const fuentes = docs.filter((doc) => !doc.armado && !ocultos.has(doc.tipo));
+                    const base = fuentes.length ? fuentes : docs.filter((doc) => doc.armado && !doc.viejo);
+                    const cargadas: FotoHoja[] = [];
+                    for (const doc of base) {
                       const file = await traerDocumento(doc.id);
                       const bytes = bytesDe(file.archivo);
                       if (esPdf(file.nombre, bytes)) {
@@ -783,16 +808,19 @@ export function BloquePiloto({
                             id: `${doc.id}-p${indice}`,
                             nombre: `${nombreDe(doc.tipo)} · página ${indice + 1}`,
                             src: `data:image/jpeg;base64,${pagina.archivo}`,
+                            tipo: doc.tipo,
+                            grupo: String(doc.id),
+                            pdf: true,
                           });
                         });
                         continue;
                       }
                       if (!esFoto(file.nombre, bytes)) continue;
                       const mime = file.nombre.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
-                      cargadas.push({ id: String(doc.id), nombre: `${nombreDe(doc.tipo)} · ${file.nombre}`, src: `data:${mime};base64,${file.archivo}` });
+                      cargadas.push({ id: String(doc.id), nombre: nombreDe(doc.tipo), src: `data:${mime};base64,${file.archivo}`, tipo: doc.tipo });
                     }
                     if (!cargadas.length) throw new Error("No hay fotos ni PDF para acomodar.");
-                    setEditor(cargadas);
+                    setEditor({ fotos: cargadas, fuentes: fuentes.map((doc) => doc.id), viejas: docs.filter((doc) => doc.armado).map((doc) => doc.id) });
                   })
                 }
                 className="h-11 w-fit rounded-2xl border border-line bg-card px-4 text-sm font-semibold disabled:opacity-60"
@@ -844,8 +872,13 @@ export function BloquePiloto({
             {docsVisibles.map((doc) => (
               <li key={doc.id} className="grid gap-1 rounded-2xl border border-line bg-card px-3 py-2 text-sm">
                 <button type="button" className="text-left font-semibold text-navy" onClick={() => void correr(() => abrir(doc))}>
-                  {nombreDe(doc.tipo)} · {doc.nombre}
+                  {doc.armado ? "Hojas armadas" : nombreDe(doc.tipo)} · {doc.nombre}
                 </button>
+                {doc.armado ? (
+                  <span className={doc.viejo ? "text-danger" : "text-ink-soft"}>
+                    {doc.viejo ? "Viejas: vuelve a acomodar las fotos en hojas." : "Al día. En el paquete van en lugar de las fotos sueltas."}
+                  </span>
+                ) : null}
                 <span className="text-ink-soft">
                   {doc.cuando}
                   {doc.subidoPor ? ` · ${doc.subidoPor}` : ""}
@@ -917,22 +950,61 @@ export function BloquePiloto({
           </ul>
           {editor ? (
             <EditorHojas
-              fotos={editor}
+              fotos={editor.fotos}
+              copiasDe={(tipoDoc) => copias[tipoDoc] ?? copias[tipoVisible(tipoDoc)] ?? copiasAlImprimir(tipoDoc)}
               onCerrar={() => setEditor(null)}
               onGuardar={async (hojas) => {
+                // Guarda qué documentos lleva adentro. Si después borran o cambian uno, estas hojas quedan viejas.
+                const lectura = JSON.stringify({ armado: true, fuentes: editor.fuentes });
                 for (const hoja of hojas) {
                   const cargaId = crypto.randomUUID();
                   await enviarEnTrozos(hoja.archivo, async (orden, datos, fin) => {
                     await recibirTrozo({
-                      data: { cargaId, orden, datos, fin, casoId: caso.id, tipo: "unificado", nombre: hoja.nombre, lectura: "" },
+                      data: { cargaId, orden, datos, fin, casoId: caso.id, tipo: "unificado", nombre: hoja.nombre, lectura },
                     });
                   });
                 }
+                // Las hojas armadas de antes se reemplazan, para que no queden dos.
+                for (const id of editor.viejas) await borrarDocumento({ data: id }).catch(() => {});
                 setEditor(null);
                 await cargar();
                 onListo();
               }}
             />
+          ) : null}
+          {paquete ? (
+            <div className="fixed inset-0 z-40 grid place-items-center bg-ink/50 p-4" onClick={() => setPaquete(null)}>
+              <div className="grid max-h-[92vh] w-full max-w-3xl gap-3 overflow-auto rounded-card bg-card p-4" onClick={(e) => e.stopPropagation()}>
+                <p className="font-semibold">Esto es lo que se va a bajar</p>
+                <ol className="grid gap-1 text-sm">
+                  {paquete.contenido.map((parte, i) => (
+                    <li key={`${parte.nombre}-${i}`}>
+                      {i + 1}. {parte.nombre}
+                      <span className="text-ink-soft">
+                        {" "}· {parte.hojas} {parte.hojas === 1 ? "hoja" : "hojas"}
+                        {parte.copias > 1 ? ` (${parte.copias} copias)` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <iframe title={paquete.nombre} src={paquete.url} className="h-[60vh] w-full rounded-2xl border border-line bg-white" />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="h-10 rounded-2xl bg-navy px-4 text-sm font-semibold text-paper"
+                    onClick={() => {
+                      bajar(paquete.nombre, paquete.archivo);
+                      setPaquete(null);
+                    }}
+                  >
+                    Descargar
+                  </button>
+                  <button type="button" className="h-10 rounded-2xl border border-line px-3 text-sm font-semibold" onClick={() => setPaquete(null)}>
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
           ) : null}
           {colaFoto[0] ? (
             <RecortarFoto

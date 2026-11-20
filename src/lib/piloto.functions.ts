@@ -11,7 +11,51 @@ export type PilotoEstado = {
   usuarios: { slug: string; name: string; role: string; clave: string }[];
 };
 
-export type DocItem = { id: number; tipo: string; nombre: string; subidoPor: string; cuando: string; vigencia: string; vence: string };
+export type DocItem = {
+  id: number;
+  tipo: string;
+  nombre: string;
+  subidoPor: string;
+  cuando: string;
+  vigencia: string;
+  vence: string;
+  // Es el PDF que sale de "Acomodar fotos en hojas".
+  armado?: boolean;
+  // Le borraron un documento que llevaba adentro: ya no sirve para imprimir.
+  viejo?: boolean;
+};
+
+// Las hojas armadas guardan en lectura qué documentos llevan adentro: {"armado":true,"fuentes":[ids]}.
+// Las de antes no lo guardaban (fuentes null): se tratan como un documento más.
+function armadoDe(row: { tipo: string; nombre: string; lectura: string }): { fuentes: number[] | null } | null {
+  if (row.tipo !== "unificado") return null;
+  try {
+    const leido = JSON.parse(row.lectura || "{}") as { armado?: boolean; fuentes?: unknown };
+    if (leido.armado && Array.isArray(leido.fuentes)) return { fuentes: leido.fuentes.map(Number).filter((n) => Number.isFinite(n)) };
+  } catch {
+    // lectura vieja o vacía
+  }
+  return row.nombre === "documentos-operativa.pdf" ? { fuentes: null } : null;
+}
+
+function armadoVigente(armado: { fuentes: number[] | null } | null, ids: Set<number>) {
+  return Boolean(armado?.fuentes && armado.fuentes.every((id) => ids.has(id)));
+}
+
+// Cambiaron (o giraron) un documento que estaba dentro de unas hojas armadas:
+// esas hojas quedan viejas, igual que si lo hubieran borrado.
+async function envejecerArmadas(sql: Awaited<ReturnType<typeof getSql>>, casoId: number, docId: number) {
+  const rows = await sql.query<{ id: number; tipo: string; nombre: string; lectura: string }>(
+    `select id, tipo, nombre, lectura from documentos where caso_id = $1 and tipo = 'unificado'`,
+    [casoId],
+  );
+  for (const row of rows) {
+    const armado = armadoDe(row);
+    if (!armado?.fuentes?.includes(docId)) continue;
+    const lectura = JSON.stringify({ armado: true, fuentes: [...armado.fuentes, -1] });
+    await sql.query(`update documentos set lectura = $1 where id = $2`, [lectura, row.id]);
+  }
+}
 
 type CasoMano = {
   id: number;
@@ -475,9 +519,11 @@ export const listarDocumentos = createServerFn({ method: "POST" })
        from documentos where caso_id = $1 order by id`,
       [casoId],
     );
+    const ids = new Set(rows.map((row) => Number(row.id)));
     return rows
       .filter((row) => puedeArchivo(profile.role, row.tipo, caso, permitidos))
       .map((row) => {
+        const armado = armadoDe(row);
         let vigencia = "";
         let vence = "";
         try {
@@ -487,7 +533,17 @@ export const listarDocumentos = createServerFn({ method: "POST" })
         } catch {
           vigencia = "";
         }
-        return { id: Number(row.id), tipo: row.tipo, nombre: row.nombre, subidoPor: row.subido_por, cuando: row.cuando, vigencia, vence };
+        return {
+          id: Number(row.id),
+          tipo: row.tipo,
+          nombre: row.nombre,
+          subidoPor: row.subido_por,
+          cuando: row.cuando,
+          vigencia,
+          vence,
+          armado: Boolean(armado),
+          viejo: Boolean(armado?.fuentes) && !armadoVigente(armado, ids),
+        };
       });
   });
 
@@ -575,6 +631,7 @@ export const recibirTrozo = createServerFn({ method: "POST" })
         await borrarDeDrive(previo.drive_id);
       }
       await sql.query(`update documentos set nombre = $1, archivo = $2, drive_id = $3 where id = $4`, [nombre, copia, drive.id || previo.drive_id, data.reemplazaId]);
+      await envejecerArmadas(sql, caso.id, data.reemplazaId);
     } else if (tipo === "contrato") {
       const ya = await sql.query<{ id: number; drive_id: string }>(
         `select id, drive_id from documentos where caso_id = $1 and tipo = 'contrato' order by id desc limit 1`,
@@ -588,6 +645,7 @@ export const recibirTrozo = createServerFn({ method: "POST" })
         await sql.query(`update documentos set nombre = $1, archivo = $2, subido_por = $3, drive_id = $4, lectura = $5 where id = $6`, [
           nombre, copia, profile.name, drive.id || ya[0].drive_id, lectura, ya[0].id,
         ]);
+        await envejecerArmadas(sql, caso.id, Number(ya[0].id));
       } else {
         await sql.query(
           `insert into documentos (caso_id, tipo, nombre, archivo, subido_por, drive_id, lectura) values ($1, $2, $3, $4, $5, $6, $7)`,
@@ -972,24 +1030,41 @@ export const bajarPaquete = createServerFn({ method: "POST" })
     if (profile.role === "via_seguros" || profile.role === "servicio") throw new Error("El paquete lo imprime operativa");
     const permitidos = await docsOperativa();
     const sql = await getSql();
-    const rows = await sql.query<{ tipo: string; nombre: string; archivo: string; drive_id: string }>(
-      `select tipo, nombre, archivo, drive_id from documentos where caso_id = $1 order by id`,
+    const rows = await sql.query<{ id: number; tipo: string; nombre: string; archivo: string; drive_id: string; lectura: string }>(
+      `select id, tipo, nombre, archivo, drive_id, lectura from documentos where caso_id = $1 order by id`,
       [casoId],
     );
-    const lista = rows.filter((row) => puedeArchivo(profile.role, row.tipo, caso, permitidos));
+    const ids = new Set(rows.map((row) => Number(row.id)));
+    // Si hay hojas armadas al día, van primero y en lugar de los documentos que llevan adentro
+    // (así no salen repetidos). Las hojas armadas viejas (les borraron un documento) no se imprimen.
+    const vigente = [...rows].reverse().find((row) => armadoVigente(armadoDe(row), ids));
+    const dentro = new Set(vigente ? (armadoDe(vigente)?.fuentes ?? []) : []);
+    const ordenadas = vigente ? [vigente, ...rows.filter((row) => row !== vigente)] : rows;
+    const lista = ordenadas.filter((row) => {
+      if (row !== vigente) {
+        const armado = armadoDe(row);
+        if (armado?.fuentes) return false;
+        if (vigente && armado) return false;
+        if (dentro.has(Number(row.id))) return false;
+      }
+      return puedeArchivo(profile.role, row.tipo, caso, permitidos);
+    });
     if (!lista.length) throw new Error("No hay documentos para imprimir");
     const { leerDeDrive } = await import("./drive.server");
     const { PDFDocument } = await import("pdf-lib");
     const out = await PDFDocument.create();
     let metio = 0;
+    const contenido: { nombre: string; copias: number; hojas: number }[] = [];
     for (const doc of lista) {
+      const antes = out.getPageCount();
       let crudo = doc.archivo;
       if (!crudo && doc.drive_id) crudo = await leerDeDrive(doc.drive_id);
       if (!crudo) continue;
       const raw = bytesDe(crudo);
       const nombre = doc.nombre.toLowerCase();
       const vecesConfig = await (await import("./gerencia.functions")).copiasConfig(caso.ciudad_id, doc.tipo);
-      const veces = vecesConfig && vecesConfig > 0 ? vecesConfig : copiasAlImprimir(doc.tipo);
+      // Las hojas armadas ya traen sus copias adentro.
+      const veces = doc === vigente ? 1 : vecesConfig && vecesConfig > 0 ? vecesConfig : copiasAlImprimir(doc.tipo);
       try {
         if (nombre.endsWith(".pdf") || (raw[0] === 0x25 && raw[1] === 0x50)) {
           const src = await PDFDocument.load(raw, { ignoreEncryption: true });
@@ -1018,12 +1093,20 @@ export const bajarPaquete = createServerFn({ method: "POST" })
       } catch {
         metio += 0;
       }
+      const hojas = out.getPageCount() - antes;
+      if (hojas > 0) {
+        contenido.push({
+          nombre: doc === vigente ? "Hojas armadas (cédula, tarjetas y demás, ya con sus copias)" : `${etiquetaDoc(doc.tipo)} · ${doc.nombre}`,
+          copias: doc === vigente ? 1 : veces,
+          hojas,
+        });
+      }
     }
     if (!metio) throw new Error("Esos archivos no se pudieron juntar. Bájalos uno por uno.");
     const pdf = await out.save();
     const archivo = base64De(pdf);
     const nombre = `${caso.placa}-paquete.pdf`;
-    if (archivo.length <= 600_000) return { nombre, archivo, cargaId: "", total: archivo.length };
+    if (archivo.length <= 600_000) return { nombre, archivo, cargaId: "", total: archivo.length, contenido };
     await asegurarCargas(sql);
     const cargaId = `paq-${caso.id}-${Date.now()}`;
     const tope = 600_000;
@@ -1033,7 +1116,7 @@ export const bajarPaquete = createServerFn({ method: "POST" })
         [cargaId, orden, archivo.slice(i, i + tope), caso.id, nombre],
       );
     }
-    return { nombre, archivo: "", cargaId, total: archivo.length };
+    return { nombre, archivo: "", cargaId, total: archivo.length, contenido };
   });
 
 function bytesDe(value: string) {
